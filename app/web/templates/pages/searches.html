@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}Searches - OEMPartsAgent{% endblock %}
+
+{% block content %}
+<h1 class="page-title">Part Searches</h1>
+
+{% if vehicles %}
+<!-- Add Search Form -->
+<form class="form-inline" hx-post="/searches" hx-target="#search-list" hx-swap="beforeend">
+    <div class="form-group">
+        <label for="vehicle_id">Vehicle</label>
+        <select id="vehicle_id" name="vehicle_id" class="form-control" required>
+            {% for v in vehicles %}
+            <option value="{{ v.id }}">
+                {{ vehicle_display_name(v.year, v.make, v.model, v.nickname) }}
+            </option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="form-group">
+        <label for="query_text">Part Search</label>
+        <input type="text" id="query_text" name="query_text" class="form-control" required
+               placeholder="e.g. coolant crossover pipe" style="width: 220px;">
+    </div>
+    <div class="form-group">
+        <label for="oem_number">OEM #</label>
+        <input type="text" id="oem_number" name="oem_number" class="form-control"
+               placeholder="Optional" style="width: 130px;">
+    </div>
+    <div class="form-group">
+        <label for="max_price">Max Price</label>
+        <input type="text" id="max_price" name="max_price" class="form-control"
+               placeholder="$" style="width: 90px;">
+    </div>
+    <div class="form-group">
+        <label for="condition_filter">Condition</label>
+        <select id="condition_filter" name="condition_filter" class="form-control">
+            <option value="">Any</option>
+            <option value="New" selected>New</option>
+            <option value="Used">Used</option>
+        </select>
+    </div>
+    <div class="form-group">
+        <label>&nbsp;</label>
+        <button type="submit" class="btn btn-primary">Add Search</button>
+    </div>
+</form>
+{% else %}
+<div class="empty-state">
+    <p>Add a vehicle first before creating searches.</p>
+    <a href="/vehicles" class="btn btn-primary">Add a Vehicle</a>
+</div>
+{% endif %}
+
+<!-- Search Table -->
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>Vehicle</th>
+                <th>Search Query</th>
+                <th>OEM #</th>
+                <th>Max Price</th>
+                <th>Condition</th>
+                <th>Status</th>
+                <th>Last Fetched</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody id="search-list">
+            {% for vehicle in vehicles %}
+                {% for search in searches_by_vehicle.get(vehicle.id, []) %}
+                    {% include "components/search_row.html" %}
+                {% endfor %}
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% set total_searches = searches_by_vehicle.values()|map('length')|sum %}
+{% if vehicles and total_searches == 0 %}
+<div class="empty-state">
+    <p>No searches yet. Add one above to start tracking parts.</p>
+</div>
+{% endif %}
+{% endblock %}

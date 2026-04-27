@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}OEMPartsAgent{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/theme.css">
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script src="/static/js/app.js" defer></script>
+</head>
+<body>
+    <div class="layout">
+        <aside class="sidebar">
+            <div class="sidebar-brand">OEMPartsAgent</div>
+            <ul class="sidebar-nav">
+                <li>
+                    <a href="/" class="{{ 'active' if active_page == 'home' else '' }}">
+                        Dashboard
+                    </a>
+                </li>
+                <li>
+                    <a href="/vehicles" class="{{ 'active' if active_page == 'vehicles' else '' }}">
+                        Vehicles
+                    </a>
+                </li>
+                <li>
+                    <a href="/searches" class="{{ 'active' if active_page == 'searches' else '' }}">
+                        Searches
+                    </a>
+                </li>
+                <li>
+                    <a href="/listings" class="{{ 'active' if active_page == 'listings' else '' }}">
+                        Listings
+                    </a>
+                </li>
+            </ul>
+        </aside>
+
+        <main class="main-content">
+            {% block flash %}
+            {% if flash_message %}
+                <div class="flash flash-{{ flash_type|default('success') }}">
+                    {{ flash_message }}
+                </div>
+            {% endif %}
+            {% endblock %}
+
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+</body>
+</html>

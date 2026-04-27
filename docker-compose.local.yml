@@ -1,0 +1,20 @@
+services:
+  db:
+    image: postgres:15
+    restart: unless-stopped
+    ports:
+      - "5442:5432"
+    environment:
+      POSTGRES_DB: oemparts
+      POSTGRES_USER: oemparts
+      POSTGRES_PASSWORD: changeme_secure_password_here
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oemparts"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:

@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+
+{% block title %}Price History - OEMPartsAgent{% endblock %}
+
+{% block content %}
+{% if listing %}
+<h1 class="page-title">Price History</h1>
+
+<div class="card mb-2">
+    <div class="listing-title" style="font-size: 1.1rem;">{{ listing.title }}</div>
+    <div class="listing-meta mt-1">
+        eBay ID: {{ listing.ebay_item_id }} &middot;
+        Current price: <span class="listing-price">{{ listing.price|format_price }}</span> &middot;
+        <span class="badge {{ 'badge-active' if listing.is_active else 'badge-inactive' }}">
+            {{ 'Active' if listing.is_active else 'Ended' }}
+        </span>
+    </div>
+    <div class="mt-1">
+        <a href="{{ listing.item_url }}" target="_blank" rel="noopener" class="btn btn-primary btn-sm">
+            View on eBay
+        </a>
+        <a href="/listings" class="btn btn-secondary btn-sm">Back to Listings</a>
+    </div>
+</div>
+
+{% if history %}
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Price</th>
+                <th>Change</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for snapshot in history %}
+            <tr>
+                <td>{{ snapshot.recorded_at|format_datetime }}</td>
+                <td class="listing-price">{{ snapshot.price|format_price }}</td>
+                <td>
+                    {% if not loop.last %}
+                        {% set prev_price = history[loop.index].price %}
+                        {% set diff = snapshot.price - prev_price %}
+                        {% if diff > 0 %}
+                            <span class="price-up">+{{ diff|format_price }}</span>
+                        {% elif diff < 0 %}
+                            <span class="price-down">{{ diff|format_price }}</span>
+                        {% else %}
+                            <span class="price-same">—</span>
+                        {% endif %}
+                    {% else %}
+                        <span class="text-muted">First recorded</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="empty-state">
+    <p>No price history recorded yet for this listing.</p>
+</div>
+{% endif %}
+
+{% else %}
+<h1 class="page-title">Listing Not Found</h1>
+<div class="empty-state">
+    <p>The requested listing was not found.</p>
+    <a href="/listings" class="btn btn-secondary">Back to Listings</a>
+</div>
+{% endif %}
+{% endblock %}

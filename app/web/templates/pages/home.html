@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - OEMPartsAgent{% endblock %}
+
+{% block content %}
+<h1 class="page-title">Dashboard</h1>
+
+<div class="stats-grid">
+    <div class="card">
+        <div class="card-title">Vehicles</div>
+        <div class="card-value">{{ vehicle_count }}</div>
+    </div>
+    <div class="card">
+        <div class="card-title">Active Searches</div>
+        <div class="card-value">{{ active_search_count }} <span class="text-muted" style="font-size: 0.9rem;">/ {{ search_count }}</span></div>
+    </div>
+    <div class="card">
+        <div class="card-title">Tracked Listings</div>
+        <div class="card-value">{{ listing_count }}</div>
+    </div>
+    <div class="card">
+        <div class="card-title">Last Fetch</div>
+        {% if latest_fetch %}
+            <div class="card-value" style="font-size: 1.1rem;">
+                {{ latest_fetch.started_at|format_datetime }}
+            </div>
+            <div class="text-secondary mt-1" style="font-size: 0.85rem;">
+                {{ latest_fetch.searches_processed }} searches &middot;
+                {{ latest_fetch.listings_new }} new &middot;
+                <span class="badge {{ 'badge-active' if latest_fetch.status == 'completed' else 'badge-inactive' }}">
+                    {{ latest_fetch.status }}
+                </span>
+            </div>
+        {% else %}
+            <div class="card-value" style="font-size: 1.1rem;">Never</div>
+            <div class="text-secondary mt-1" style="font-size: 0.85rem;">
+                No fetch cycles have run yet
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+{% if vehicle_count == 0 %}
+<div class="empty-state">
+    <p>Welcome to OEMPartsAgent! Get started by adding a vehicle.</p>
+    <a href="/vehicles" class="btn btn-primary">Add Your First Vehicle</a>
+</div>
+{% elif search_count == 0 %}
+<div class="empty-state">
+    <p>You have {{ vehicle_count }} vehicle(s) but no searches yet.</p>
+    <a href="/searches" class="btn btn-primary">Create a Part Search</a>
+</div>
+{% elif listing_count == 0 %}
+<div class="empty-state">
+    <p>Searches are set up. Run a fetch cycle to start tracking listings.</p>
+    <p class="text-muted">Run: <code>./oemparts fetch --cycle=manual</code></p>
+</div>
+{% endif %}
+{% endblock %}

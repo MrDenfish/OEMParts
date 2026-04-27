@@ -1,0 +1,17 @@
+<tr class="vehicle-row" id="vehicle-{{ vehicle.id }}">
+    <td>{{ vehicle.year }}</td>
+    <td>{{ vehicle.make }}</td>
+    <td>{{ vehicle.model }}</td>
+    <td>{{ vehicle.trim or '—' }}</td>
+    <td>{{ vehicle.nickname or '—' }}</td>
+    <td class="text-secondary">{{ vehicle.created_at|format_datetime }}</td>
+    <td>
+        <button class="btn btn-danger btn-sm"
+                hx-delete="/vehicles/{{ vehicle.id }}"
+                hx-target="#vehicle-{{ vehicle.id }}"
+                hx-swap="outerHTML"
+                hx-confirm="Delete this vehicle and all its searches?">
+            Delete
+        </button>
+    </td>
+</tr>

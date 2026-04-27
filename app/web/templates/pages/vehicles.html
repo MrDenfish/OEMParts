@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}Vehicles - OEMPartsAgent{% endblock %}
+
+{% block content %}
+<h1 class="page-title">My Vehicles</h1>
+
+<!-- Add Vehicle Form -->
+<form class="form-inline" hx-post="/vehicles" hx-target="#vehicle-list" hx-swap="beforeend">
+    <div class="form-group">
+        <label for="year">Year</label>
+        <input type="number" id="year" name="year" class="form-control" min="1900" max="2030" required style="width: 90px;">
+    </div>
+    <div class="form-group">
+        <label for="make">Make</label>
+        <input type="text" id="make" name="make" class="form-control" required placeholder="e.g. Land Rover" style="width: 150px;">
+    </div>
+    <div class="form-group">
+        <label for="model">Model</label>
+        <input type="text" id="model" name="model" class="form-control" required placeholder="e.g. LR4" style="width: 140px;">
+    </div>
+    <div class="form-group">
+        <label for="trim">Trim</label>
+        <input type="text" id="trim" name="trim" class="form-control" placeholder="Optional" style="width: 120px;">
+    </div>
+    <div class="form-group">
+        <label for="nickname">Nickname</label>
+        <input type="text" id="nickname" name="nickname" class="form-control" placeholder="Optional" style="width: 140px;">
+    </div>
+    <div class="form-group">
+        <label>&nbsp;</label>
+        <button type="submit" class="btn btn-primary">Add Vehicle</button>
+    </div>
+</form>
+
+<!-- Vehicle Table -->
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>Year</th>
+                <th>Make</th>
+                <th>Model</th>
+                <th>Trim</th>
+                <th>Nickname</th>
+                <th>Added</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody id="vehicle-list">
+            {% for vehicle in vehicles %}
+                {% include "components/vehicle_row.html" %}
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% if not vehicles %}
+<div class="empty-state">
+    <p>No vehicles yet. Add one above to get started.</p>
+</div>
+{% endif %}
+{% endblock %}

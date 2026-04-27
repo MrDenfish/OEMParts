@@ -17,9 +17,9 @@
 
 ## Current Phase
 
-**Phase 0** — Specification complete. Ready to begin Phase 1 (single-user MVP).
+**Phase 1** — Single-user MVP complete (2026-04-26). All core components implemented and validated with real eBay data (249 listings across 5 searches for 2012 Land Rover LR4).
 
-Phase 1 goal: Owner can track ~20 parts for a 2012 Land Rover LR4 on a local Docker Compose stack, with fetch cycles running via cron and a working FastAPI + HTMX dashboard.
+Phase 2 goal: Clerk auth, EC2 deployment with Caddy + SSL, VIN decoding, taxonomy-based fitment filtering, cron-driven fetch cycles.
 
 **Do not skip ahead to Phase 2+ features** (Clerk auth, EC2 deployment, email alerts, EPN integration) without explicit instruction. Phase discipline is deliberate — see `SYSTEM_CONTEXT.md` Section 10.
 

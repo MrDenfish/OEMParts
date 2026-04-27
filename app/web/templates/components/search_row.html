@@ -1,0 +1,42 @@
+<tr class="search-row" id="search-{{ search.id }}">
+    <td>
+        {% if search.vehicle %}
+            {{ vehicle_display_name(search.vehicle.year, search.vehicle.make, search.vehicle.model, search.vehicle.nickname) }}
+        {% else %}
+            —
+        {% endif %}
+    </td>
+    <td>{{ search.query_text }}</td>
+    <td class="text-secondary">{{ search.oem_number or '—' }}</td>
+    <td>{{ search.max_price|format_price if search.max_price else '—' }}</td>
+    <td>{{ search.condition_filter or 'Any' }}</td>
+    <td>
+        <span class="badge {{ 'badge-active' if search.is_active else 'badge-inactive' }}">
+            {{ 'Active' if search.is_active else 'Paused' }}
+        </span>
+    </td>
+    <td class="text-secondary">{{ search.last_fetched_at|format_datetime }}</td>
+    <td>
+        <button class="btn btn-primary btn-sm"
+                hx-post="/searches/{{ search.id }}/fetch"
+                hx-target="#search-{{ search.id }}"
+                hx-swap="outerHTML"
+                hx-indicator="#fetch-spinner-{{ search.id }}">
+            Fetch Now
+        </button>
+        <span id="fetch-spinner-{{ search.id }}" class="htmx-indicator" style="margin-left: 4px;">Fetching...</span>
+        <button class="btn btn-secondary btn-sm"
+                hx-patch="/searches/{{ search.id }}/toggle"
+                hx-target="#search-{{ search.id }}"
+                hx-swap="outerHTML">
+            {{ 'Pause' if search.is_active else 'Resume' }}
+        </button>
+        <button class="btn btn-danger btn-sm"
+                hx-delete="/searches/{{ search.id }}"
+                hx-target="#search-{{ search.id }}"
+                hx-swap="outerHTML"
+                hx-confirm="Delete this search?">
+            Delete
+        </button>
+    </td>
+</tr>

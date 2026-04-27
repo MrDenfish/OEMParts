@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+"""OEMParts CLI entry point.
+
+Usage: ./oemparts <command> [options]
+See docs/SYSTEM_CONTEXT.md Section 12 for full command reference.
+"""
+
+import os
+import sys
+
+# Ensure the project root is on the Python path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from app.worker.cli import main
+
+if __name__ == "__main__":
+    main()

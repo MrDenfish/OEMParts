@@ -1,0 +1,37 @@
+{% for listing in listings %}
+<tr>
+    <td>
+        {% if listing.image_url %}
+        <img src="{{ listing.image_url }}" alt="" class="listing-thumb">
+        {% else %}
+        <div class="listing-thumb" style="display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:0.7rem;">No img</div>
+        {% endif %}
+    </td>
+    <td>
+        <div class="listing-title">{{ listing.title|truncate(80) }}</div>
+        <div class="listing-meta">
+            {{ listing.ebay_item_id }}
+            {% if not listing.is_active %}
+                <span class="badge badge-inactive">Ended</span>
+            {% endif %}
+        </div>
+    </td>
+    <td class="listing-price">{{ listing.price|format_price }}</td>
+    <td>{{ listing.condition or '—' }}</td>
+    <td>
+        <div>{{ listing.seller_name or '—' }}</div>
+        {% if listing.seller_feedback_pct %}
+        <div class="listing-meta">{{ listing.seller_feedback_pct }}% positive</div>
+        {% endif %}
+    </td>
+    <td class="text-secondary">{{ listing.last_seen_at|format_datetime }}</td>
+    <td>
+        <a href="{{ listing.item_url }}" target="_blank" rel="noopener" class="btn btn-primary btn-sm">
+            View on eBay
+        </a>
+        <a href="/price-history?listing_id={{ listing.id }}" class="btn btn-secondary btn-sm">
+            Price History
+        </a>
+    </td>
+</tr>
+{% endfor %}

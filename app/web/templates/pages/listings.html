@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+
+{% block title %}Listings - OEMPartsAgent{% endblock %}
+
+{% block content %}
+<h1 class="page-title">Listings</h1>
+
+<!-- Filter Bar -->
+<form class="form-inline" hx-get="/listings" hx-target="#listing-table-body" hx-swap="innerHTML">
+    <div class="form-group">
+        <label for="vehicle_id">Vehicle</label>
+        <select id="vehicle_id" name="vehicle_id" class="form-control">
+            <option value="">All Vehicles</option>
+            {% for v in vehicles %}
+            <option value="{{ v.id }}" {{ 'selected' if filter_vehicle_id == v.id|string else '' }}>
+                {{ vehicle_display_name(v.year, v.make, v.model, v.nickname) }}
+            </option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="form-group">
+        <label for="search_id">Search</label>
+        <select id="search_id" name="search_id" class="form-control">
+            <option value="">All Searches</option>
+            {% for s in searches %}
+            <option value="{{ s.id }}" {{ 'selected' if filter_search_id == s.id|string else '' }}>
+                {{ s.query_text }}
+            </option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="form-group">
+        <label for="min_price">Min $</label>
+        <input type="text" id="min_price" name="min_price" class="form-control"
+               value="{{ filter_min_price }}" style="width: 80px;">
+    </div>
+    <div class="form-group">
+        <label for="max_price">Max $</label>
+        <input type="text" id="max_price" name="max_price" class="form-control"
+               value="{{ filter_max_price }}" style="width: 80px;">
+    </div>
+    <div class="form-group">
+        <label for="condition">Condition</label>
+        <select id="condition" name="condition" class="form-control">
+            <option value="">Any</option>
+            <option value="New" {{ 'selected' if filter_condition == 'New' else '' }}>New</option>
+            <option value="Used" {{ 'selected' if filter_condition == 'Used' else '' }}>Used</option>
+            <option value="Refurbished" {{ 'selected' if filter_condition == 'Refurbished' else '' }}>Refurbished</option>
+        </select>
+    </div>
+    <div class="form-group">
+        <label>&nbsp;</label>
+        <button type="submit" class="btn btn-secondary">Filter</button>
+    </div>
+</form>
+
+<!-- Listings Table -->
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th></th>
+                <th>Title</th>
+                <th>Price</th>
+                <th>Condition</th>
+                <th>Seller</th>
+                <th>Last Seen</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody id="listing-table-body">
+            {% include "components/listing_table.html" %}
+        </tbody>
+    </table>
+</div>
+
+{% if not listings %}
+<div class="empty-state">
+    <p>No listings found. Run a fetch cycle to populate results.</p>
+    <p class="text-muted">Run: <code>./oemparts fetch --cycle=manual</code></p>
+</div>
+{% endif %}
+
+{% if has_more %}
+<div class="pagination">
+    {% if page > 1 %}
+    <a href="/listings?page={{ page - 1 }}">Prev</a>
+    {% endif %}
+    <span class="current">Page {{ page }}</span>
+    <a href="/listings?page={{ page + 1 }}">Next</a>
+</div>
+{% endif %}
+{% endblock %}

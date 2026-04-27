@@ -3,7 +3,7 @@
 > **Audience:** Developers, AI assistants, and outside collaborators.
 > **How to use:** Read top-to-bottom for full context, or jump to a section. If you're an AI assistant starting a new conversation, this is your single-source briefing.
 > **Keeping it current:** Update the [Changelog](#changelog) at the bottom whenever significant changes ship. Stale docs are worse than no docs.
-> **Status:** Pre-build specification (Phase 0). Sections describing code and schema represent the **target design**, not current state. The Changelog starts from project inception.
+> **Status:** Phase 1 MVP complete (2026-04-26). All core components implemented and validated end-to-end with real eBay data. See [Changelog](#changelog) for details.
 
 ---
 
@@ -326,14 +326,15 @@ PYTHONPATH=$PWD uvicorn app.web.main:app --host 0.0.0.0 --port 8000 --reload
 
 The project is explicitly phased to defer commercial complexity until the core value is proven. Each phase has exit criteria.
 
-### Phase 0 — Specification (current)
-Write this document. Set up GitHub repo with `CLAUDE.md` context file. Purchase domain oempartsagent.com and park it on Cloudflare. Create eBay Developer account and generate production keyset. Create eBay Partner Network account and obtain Campaign ID. **Exit:** Spec signed off, repo scaffolded, credentials in hand.
+### Phase 0 — Specification (complete)
+Write this document. Set up GitHub repo with `CLAUDE.md` context file. Purchase domain oempartsagent.com and park it on Cloudflare. Create eBay Developer account and generate production keyset. Create eBay Partner Network account and obtain Campaign ID. **Exit:** Spec signed off, repo scaffolded, credentials in hand. **Completed 2026-04-22.**
 
-### Phase 1 — Single-User MVP (~2-3 weekends)
-Backend: OAuth token management, Browse API client with compatibility filter, search runner, deduplicator (structurally present even if unused with one user), SQLAlchemy models, Alembic migrations, cron-driven fetcher.
-Frontend: Basic FastAPI + HTMX dashboard with pages for Vehicles, Searches, Listings, Price History. Basic auth (hardcoded single user).
+### Phase 1 — Single-User MVP (complete)
+Backend: OAuth token management (3-tier caching), Browse API client with condition filtering, search runner (enriches query with vehicle year/make/model), deduplicator with TTL, SQLAlchemy models, Alembic migrations, CLI-driven fetcher with manual/nightly/intraday cycles.
+Frontend: Dark-themed FastAPI + HTMX dashboard with pages for Vehicles, Searches, Listings, Price History. HTTP Basic auth with session cookie. "Fetch Now" button per search. Auto-fetch on new search creation. Condition filter (New/Used/Any) per search.
 Deployment: Local Docker Compose only. Not yet on EC2.
-**Exit:** Owner can track 20+ parts for the LR4 locally, fetch cycles run reliably via cron, dashboard renders listings with working filters.
+**Exit:** Owner can track 20+ parts for the LR4 locally, fetch cycles run reliably via CLI, dashboard renders real eBay listings with working filters. **Completed 2026-04-26.**
+**Note:** compatibility_filter requires leaf-level eBay category IDs (taxonomy module, Phase 2+). Phase 1 workaround: vehicle year/make/model prepended to search query text.
 
 ### Phase 2 — Multi-Tenancy + Deployment (~2 weekends)
 Add Clerk auth integration. Migrate `basic.py` auth to `clerk.py`. Activate real multi-user pathways (signup, login, logout). Deploy to EC2 with Docker Compose, Caddy reverse proxy, SSL for oempartsagent.com. Add VIN decoding via NHTSA. Add cascading Y/M/M dropdowns via eBay Taxonomy API. Invite 2-3 friends with different vehicles to stress-test.
@@ -473,29 +474,21 @@ Initial launch US-only (`EBAY_MARKETPLACE_ID=EBAY_US`, NHTSA VIN decode is US-sp
 
 ## 15. What's Next
 
-### Currently (Phase 0, pre-build)
-- Finalize this specification document (current)
-- Create GitHub repo with initial file scaffolding and `CLAUDE.md`
-- Purchase oempartsagent.com domain, park on Cloudflare
-- Register eBay Developer account, generate production keyset
-- Register eBay Partner Network account, obtain Campaign ID
+### Completed
+- **Phase 0:** Specification, scaffolding, eBay developer account, domain acquisition
+- **Phase 1:** Full single-user MVP — OAuth, Browse API, search runner, dedup, CLI, dashboard (4 pages), condition filtering, auto-fetch, 19 passing tests
 
-### Next Up (Phase 1 — single-user MVP)
-- Scaffold FastAPI project structure per [Section 3](#3-codebase-map)
-- Implement `ebay_oauth.py` with token caching
-- Implement `ebay_browse.py` with compatibility filter support
-- Initial Alembic migration: all tables from [Section 7](#7-database-schema-key-tables)
-- Basic auth backend (`app/auth/basic.py`)
-- FastAPI routes: Vehicles, Searches, Listings, Price History
-- Local Docker Compose setup
-- First successful fetch cycle producing listings in the dashboard
-
-### Backlog (Phase 2+)
-- Clerk auth integration
-- EC2 deployment with Caddy + SSL
+### Next Up (Phase 2 — multi-tenancy + deployment)
+- Clerk auth integration (swap `basic.py` for `clerk.py`)
+- EC2 deployment with Docker Compose, Caddy reverse proxy, SSL for oempartsagent.com
 - VIN decoding via NHTSA
 - Y/M/M cascading dropdowns via Taxonomy API
-- Email alerts via AWS SES
+- Taxonomy-based compatibility_filter (replace Phase 1 query enrichment workaround)
+- Cron-driven fetch cycles (currently CLI-only)
+- Commit and push Phase 1 code to GitHub
+
+### Backlog (Phase 3+)
+- Email alerts via AWS SES (price drops, new listings)
 - EPN affiliate URL integration
 - EPN commission reporting
 - Health banner (pattern borrowed from StockAgent)
@@ -530,3 +523,5 @@ All significant changes to the system should be logged here. Format: `YYYY-MM-DD
 | Date | Change | Details |
 |------|--------|---------|
 | 2026-04-21 | **SYSTEM_CONTEXT.md created** | Initial specification document (Phase 0). Project conceived as personal parts tracker for 2012 Land Rover LR4, architected for commercial multi-tenant expansion. Domain oempartsagent.com acquired. Stack decision: FastAPI + HTMX + Jinja2 + PostgreSQL + Docker Compose on AWS EC2, mirroring StockAgent operational patterns. Monetization via eBay Partner Network only. Phase 0 gate: spec sign-off, repo scaffolding, credentials acquisition. |
+| 2026-04-21 | **Phase 1 scaffolding created** | Full project skeleton per Section 3. SQLAlchemy models for all 12 tables (Section 7). Initial Alembic migration (`862710ad10dd`) generated and verified (upgrade/downgrade/upgrade). `docker-compose.local.yml` for local Postgres 15 on port 5442. `.env.example` aligned to Section 11 (replaced StockAgent template). `requirements.txt` with initial dependencies. `app/config.py` with Pydantic Settings. No application logic — skeleton only. Note: `user_preferences` and `subscriptions` (mentioned in Section 6) not modeled; they are not defined in Section 7 and are deferred to later phases. |
+| 2026-04-26 | **Phase 1 MVP complete** | Full single-user MVP implemented and validated with real eBay data. **Database:** `session.py` (get_db + get_session), `queries.py` (25+ functions), `seed_dev_user.py`. Migration `2ef816902a3e` adds `condition_filter` to searches table. **Auth:** HTTP Basic with session cookie (`basic.py`, `dependencies.py`), auto-creates user on first login. **eBay integration:** OAuth client-credentials with 3-tier caching (`ebay_oauth.py`), Browse API search with condition filtering (`ebay_browse.py`). Note: `compatibility_filter` requires leaf-level category IDs — Phase 1 workaround prepends vehicle year/make/model to query text. **Business logic:** `search_runner.py`, `deduplicator.py` (TTL-based), `price_tracker.py`, `compatibility.py`. **CLI:** `./oemparts fetch/cleanup/health` via argparse. Manual cycles bypass dedup. **Dashboard:** Dark-themed FastAPI + HTMX. Pages: Home (stats), Vehicles (CRUD), Searches (CRUD + "Fetch Now" button + auto-fetch on create + condition filter), Listings (filters + pagination), Price History. HTMX partials for inline updates. **Tests:** 19 passing (auth, compatibility, dedup, queries, routes) against dedicated `oemparts_test` database. **Validation:** 249 real eBay listings fetched across 5 searches for 2012 Land Rover LR4. |
