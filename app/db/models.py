@@ -132,6 +132,12 @@ class Search(Base):
     is_high_priority: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False
     )
+    oem_only: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        comment="When true and oem_number is set, drop listings whose title doesn't contain OEM, Genuine, or the OEM number",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
     )

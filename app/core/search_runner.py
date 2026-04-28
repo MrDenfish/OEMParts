@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
+from app.core.oem_filter import title_matches_oem
 from app.core.price_tracker import record_price_and_detect_change
 from app.db import queries
 from app.db.models import Search
@@ -60,6 +61,24 @@ def run_single_search(db: Session, search: Search) -> SearchResult:
         condition=search.condition_filter,
     )
     api_calls = 1  # One Browse API call per search
+
+    # OEM-only title filter — applied after fetch since the Browse API
+    # has no native title-must-contain-keyword filter.
+    if search.oem_only and search.oem_number:
+        before = len(normalized_listings)
+        normalized_listings = [
+            listing
+            for listing in normalized_listings
+            if title_matches_oem(listing.title, search.oem_number)
+        ]
+        dropped = before - len(normalized_listings)
+        if dropped:
+            logger.info(
+                "OEM-only filter dropped %d/%d listings for search '%s'",
+                dropped,
+                before,
+                search.query_text,
+            )
 
     # Process each returned listing
     for normalized in normalized_listings:

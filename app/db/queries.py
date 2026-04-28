@@ -162,6 +162,7 @@ def create_search(
     max_price: Decimal | None = None,
     condition_filter: str | None = None,
     is_high_priority: bool = False,
+    oem_only: bool = False,
 ) -> Search:
     """Create a new search for a user."""
     search = Search(
@@ -172,8 +173,21 @@ def create_search(
         max_price=max_price,
         condition_filter=condition_filter,
         is_high_priority=is_high_priority,
+        oem_only=oem_only,
     )
     db.add(search)
+    db.flush()
+    return search
+
+
+def toggle_search_oem_only(
+    db: Session, search_id: uuid.UUID, user_id: uuid.UUID
+) -> Search | None:
+    """Toggle a search's oem_only flag. Returns the updated search or None."""
+    search = get_search_by_id(db, search_id, user_id)
+    if search is None:
+        return None
+    search.oem_only = not search.oem_only
     db.flush()
     return search
 

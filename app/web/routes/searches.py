@@ -76,15 +76,25 @@ def create_search(
     if parsed_condition == "":
         parsed_condition = None
 
+    parsed_oem_number = oem_number.strip() if oem_number else None
+    if parsed_oem_number == "":
+        parsed_oem_number = None
+
+    # Default ON when an OEM number is provided. The user wanted to
+    # default OEM-only filtering on for searches that have a part number,
+    # since that's the case where it most reliably trims aftermarket noise.
+    default_oem_only = parsed_oem_number is not None
+
     search = queries.create_search(
         db,
         user_id=current_user.id,
         vehicle_id=vehicle_id,
         query_text=query_text.strip(),
-        oem_number=oem_number.strip() if oem_number else None,
+        oem_number=parsed_oem_number,
         max_price=parsed_price,
         condition_filter=parsed_condition,
         is_high_priority=is_high_priority,
+        oem_only=default_oem_only,
     )
     db.commit()
     db.refresh(search)
@@ -120,6 +130,30 @@ def toggle_search(
 ):
     """Toggle a search between active and inactive."""
     search = queries.toggle_search_active(db, search_id, current_user.id)
+    db.commit()
+
+    if search is None:
+        return Response(status_code=404, content="Search not found")
+
+    if request.headers.get("HX-Request"):
+        return templates.TemplateResponse(
+            request,
+            "components/search_row.html",
+            {"search": search},
+        )
+
+    return RedirectResponse(url="/searches", status_code=303)
+
+
+@router.patch("/{search_id}/toggle-oem-only", response_model=None)
+def toggle_search_oem_only(
+    request: Request,
+    search_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Toggle a search's OEM-only title filter."""
+    search = queries.toggle_search_oem_only(db, search_id, current_user.id)
     db.commit()
 
     if search is None:

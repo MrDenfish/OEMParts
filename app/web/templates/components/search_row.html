@@ -8,6 +8,15 @@
     </td>
     <td>{{ search.query_text }}</td>
     <td class="text-secondary">{{ search.oem_number or '—' }}</td>
+    <td>
+        <button class="btn btn-secondary btn-sm"
+                hx-patch="/searches/{{ search.id }}/toggle-oem-only"
+                hx-target="#search-{{ search.id }}"
+                hx-swap="outerHTML"
+                title="Toggle OEM-only title filter">
+            {{ 'On' if search.oem_only else 'Off' }}
+        </button>
+    </td>
     <td>{{ search.max_price|format_price if search.max_price else '—' }}</td>
     <td>{{ search.condition_filter or 'Any' }}</td>
     <td>

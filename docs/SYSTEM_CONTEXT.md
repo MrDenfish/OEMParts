@@ -166,7 +166,7 @@ OEMPartsAgent/
 
 ### Key Algorithmic Pieces
 
-**Part query construction:** For each tracked part, two queries run in parallel: one using the OEM number (if provided) and one using the descriptive text. Results are merged and de-duplicated by `ebay_item_id`. This compensates for sloppy seller listings where OEM numbers are often omitted from titles.
+**Part query construction:** A single Browse API query is built from the descriptive text plus the vehicle's year/make/model. When a search has an OEM number AND `oem_only=true`, results are post-filtered: a listing is kept only if its title contains the word "OEM", the word "Genuine", or the OEM part number itself (with hyphens/spaces stripped). The Browse API has no native title-must-contain filter, so this trimming is done in the worker after the response is returned. The toggle defaults to ON for newly created searches that include an OEM number, and OFF otherwise; users can flip it per search from the dashboard.
 
 **Compatibility filter:** For categories that support fitment (eBay Motors categories 6028 and descendants), the API call includes `compatibility_filter=Year:2012;Make:Land Rover;Model:LR4`. This eliminates the bulk of false positives where a title happens to contain "LR4" but the part doesn't actually fit.
 
@@ -211,7 +211,7 @@ This project is architected as a multi-tenant system from day one, even though P
 ### Core Tables
 - **users** — id (UUID), auth_provider_id (external Clerk/Auth0 ID), email, created_at, subscription_tier (free/pro), status
 - **vehicles** — id, user_id (FK), year, make, model, trim, vin (nullable), nickname, created_at
-- **searches** — id, user_id (FK), vehicle_id (FK), query_text, oem_number (nullable), max_price (nullable), is_active, is_high_priority, created_at, last_fetched_at
+- **searches** — id, user_id (FK), vehicle_id (FK), query_text, oem_number (nullable), max_price (nullable), condition_filter (nullable: New/Used), oem_only (bool, default false), is_active, is_high_priority, created_at, last_fetched_at
 - **listings** — id, ebay_item_id (UNIQUE), title, price, currency, condition, seller_name, seller_feedback_score, seller_feedback_pct, item_url, image_url, ebay_end_date, is_active, first_seen_at, last_seen_at, category_id, compatibility_checked (bool)
 - **search_listings** — search_id (FK), listing_id (FK), matched_at, UNIQUE(search_id, listing_id)
 - **price_history** — id, listing_id (FK), price, recorded_at — separate table to prevent `listings` bloat
@@ -290,6 +290,7 @@ PYTHONPATH=$PWD uvicorn app.web.main:app --host 0.0.0.0 --port 8000 --reload
 ### Safe to Change
 - Dashboard routes and templates (`app/web/routes/`, `app/web/templates/`) — isolated UI components
 - Listing normalization rules (`app/core/search_runner.py`) — additive, easy to tune
+- OEM-only title filter heuristics (`app/core/oem_filter.py`) — covered by unit tests, isolated, easy to refine without ripple
 - Scheduled fetch times (`docker/entrypoint.worker.sh`) — adjust cadence freely
 - Configuration defaults (`app/config.py`)
 
@@ -524,4 +525,5 @@ All significant changes to the system should be logged here. Format: `YYYY-MM-DD
 |------|--------|---------|
 | 2026-04-21 | **SYSTEM_CONTEXT.md created** | Initial specification document (Phase 0). Project conceived as personal parts tracker for 2012 Land Rover LR4, architected for commercial multi-tenant expansion. Domain oempartsagent.com acquired. Stack decision: FastAPI + HTMX + Jinja2 + PostgreSQL + Docker Compose on AWS EC2, mirroring StockAgent operational patterns. Monetization via eBay Partner Network only. Phase 0 gate: spec sign-off, repo scaffolding, credentials acquisition. |
 | 2026-04-21 | **Phase 1 scaffolding created** | Full project skeleton per Section 3. SQLAlchemy models for all 12 tables (Section 7). Initial Alembic migration (`862710ad10dd`) generated and verified (upgrade/downgrade/upgrade). `docker-compose.local.yml` for local Postgres 15 on port 5442. `.env.example` aligned to Section 11 (replaced StockAgent template). `requirements.txt` with initial dependencies. `app/config.py` with Pydantic Settings. No application logic — skeleton only. Note: `user_preferences` and `subscriptions` (mentioned in Section 6) not modeled; they are not defined in Section 7 and are deferred to later phases. |
+| 2026-04-28 | **OEM-only title filter** | Added `oem_only` boolean column to `searches` (migration `50028b2596f2`), defaulting to `false` for existing rows and to `true` for newly created searches that include an OEM number. New module `app/core/oem_filter.py` keeps a listing only if its title contains the word "OEM", the word "Genuine", or the normalized OEM part number itself (with hyphens/spaces stripped, ≥4 chars to avoid collisions). Filter applied post-fetch in `search_runner.py` because the eBay Browse API has no native title-must-contain filter. Web UI: new "OEM-only" column in the searches table with a per-row On/Off toggle button (`PATCH /searches/{id}/toggle-oem-only`). 14 new unit tests; 33 tests passing total. |
 | 2026-04-26 | **Phase 1 MVP complete** | Full single-user MVP implemented and validated with real eBay data. **Database:** `session.py` (get_db + get_session), `queries.py` (25+ functions), `seed_dev_user.py`. Migration `2ef816902a3e` adds `condition_filter` to searches table. **Auth:** HTTP Basic with session cookie (`basic.py`, `dependencies.py`), auto-creates user on first login. **eBay integration:** OAuth client-credentials with 3-tier caching (`ebay_oauth.py`), Browse API search with condition filtering (`ebay_browse.py`). Note: `compatibility_filter` requires leaf-level category IDs — Phase 1 workaround prepends vehicle year/make/model to query text. **Business logic:** `search_runner.py`, `deduplicator.py` (TTL-based), `price_tracker.py`, `compatibility.py`. **CLI:** `./oemparts fetch/cleanup/health` via argparse. Manual cycles bypass dedup. **Dashboard:** Dark-themed FastAPI + HTMX. Pages: Home (stats), Vehicles (CRUD), Searches (CRUD + "Fetch Now" button + auto-fetch on create + condition filter), Listings (filters + pagination), Price History. HTMX partials for inline updates. **Tests:** 19 passing (auth, compatibility, dedup, queries, routes) against dedicated `oemparts_test` database. **Validation:** 249 real eBay listings fetched across 5 searches for 2012 Land Rover LR4. |
