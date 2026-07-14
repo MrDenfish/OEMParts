@@ -7,6 +7,22 @@
     <link rel="stylesheet" href="/static/css/theme.css">
     <script src="https://unpkg.com/htmx.org@2.0.4"></script>
     <script src="/static/js/app.js" defer></script>
+    {% if auth_backend == 'clerk' and clerk_frontend_api %}
+    {# ClerkJS v6 embed (matches the Clerk dashboard "Add to your site" snippet).
+       v6 loads the UI package separately from clerk-js and both must be present
+       before Clerk.load({ ui: ... }) runs. #}
+    <script
+        defer
+        crossorigin="anonymous"
+        src="https://{{ clerk_frontend_api }}/npm/@clerk/ui@1/dist/ui.browser.js"
+        type="text/javascript"></script>
+    <script
+        defer
+        crossorigin="anonymous"
+        data-clerk-publishable-key="{{ clerk_publishable_key }}"
+        src="https://{{ clerk_frontend_api }}/npm/@clerk/clerk-js@6/dist/clerk.browser.js"
+        type="text/javascript"></script>
+    {% endif %}
 </head>
 <body>
     <div class="layout">
@@ -34,6 +50,11 @@
                     </a>
                 </li>
             </ul>
+            {% if auth_backend == 'clerk' %}
+            <div class="sidebar-user">
+                <div id="clerk-user-button"></div>
+            </div>
+            {% endif %}
         </aside>
 
         <main class="main-content">
@@ -48,5 +69,19 @@
             {% block content %}{% endblock %}
         </main>
     </div>
+    {% if auth_backend == 'clerk' %}
+    {% block clerk_script %}
+    <script>
+        // App pages: mount the account/sign-out button once Clerk is ready.
+        window.addEventListener('load', async function () {
+            await Clerk.load({ ui: { ClerkUI: window.__internal_ClerkUICtor } });
+            const el = document.getElementById('clerk-user-button');
+            if (el && Clerk.user) {
+                Clerk.mountUserButton(el, { afterSignOutUrl: '/sign-in' });
+            }
+        });
+    </script>
+    {% endblock %}
+    {% endif %}
 </body>
 </html>

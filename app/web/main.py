@@ -7,9 +7,12 @@ Run with: PYTHONPATH=$PWD uvicorn app.web.main:app --reload --port 8000
 import logging
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
+from fastapi.exception_handlers import http_exception_handler
+from fastapi.responses import RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import settings
@@ -29,6 +32,11 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 templates.env.filters["format_price"] = format_price
 templates.env.filters["format_datetime"] = format_datetime
 templates.env.globals["vehicle_display_name"] = vehicle_display_name
+
+# Auth-related globals so base.html can conditionally load ClerkJS.
+templates.env.globals["auth_backend"] = settings.auth_backend
+templates.env.globals["clerk_publishable_key"] = settings.clerk_publishable_key
+templates.env.globals["clerk_frontend_api"] = settings.clerk_frontend_api
 
 
 def create_app() -> FastAPI:
@@ -52,9 +60,29 @@ def create_app() -> FastAPI:
         name="static",
     )
 
-    # Include route modules
-    from app.web.routes import home, listings, price_history, searches, vehicles
+    # Under the Clerk backend, a 401 from a protected page should send the
+    # browser to the embedded sign-in page rather than surface a bare error.
+    # (In basic mode we leave 401s alone so the native HTTP Basic prompt fires.)
+    @application.exception_handler(StarletteHTTPException)
+    async def auth_aware_http_exception_handler(
+        request: Request, exc: StarletteHTTPException
+    ) -> Response:
+        if (
+            exc.status_code == status.HTTP_401_UNAUTHORIZED
+            and settings.auth_backend == "clerk"
+        ):
+            # HTMX requests can't follow a 302 body-swap; use HX-Redirect.
+            if request.headers.get("HX-Request"):
+                resp = Response(status_code=status.HTTP_204_NO_CONTENT)
+                resp.headers["HX-Redirect"] = "/sign-in"
+                return resp
+            return RedirectResponse("/sign-in", status_code=status.HTTP_302_FOUND)
+        return await http_exception_handler(request, exc)
 
+    # Include route modules
+    from app.web.routes import auth, home, listings, price_history, searches, vehicles
+
+    application.include_router(auth.router)
     application.include_router(home.router)
     application.include_router(vehicles.router, prefix="/vehicles", tags=["vehicles"])
     application.include_router(searches.router, prefix="/searches", tags=["searches"])
