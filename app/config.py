@@ -3,7 +3,12 @@
 Loads values from .env file. See .env.example for all available settings.
 """
 
+import base64
+import logging
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -44,6 +49,13 @@ class Settings(BaseSettings):
     basic_auth_password: str = ""
     session_secret_key: str = ""
 
+    # Clerk (Phase 2 — used only when auth_backend == "clerk")
+    clerk_secret_key: str = ""
+    clerk_publishable_key: str = ""
+    # Comma-separated list of allowed origins (CSRF protection), e.g.
+    # "http://localhost:8000,https://oempartsagent.com"
+    clerk_authorized_parties: str = ""
+
     # Fetching
     fetch_default_ttl_minutes: int = 240
     fetch_max_listings_per_query: int = 50
@@ -65,6 +77,40 @@ class Settings(BaseSettings):
             f"postgresql://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
         )
+
+    @property
+    def clerk_authorized_parties_list(self) -> list[str]:
+        """Parse CLERK_AUTHORIZED_PARTIES (comma-separated) into a list."""
+        return [
+            part.strip()
+            for part in self.clerk_authorized_parties.split(",")
+            if part.strip()
+        ]
+
+    @property
+    def clerk_frontend_api(self) -> str:
+        """Derive the Clerk Frontend API host from the publishable key.
+
+        A Clerk publishable key is `pk_test_<b64>` or `pk_live_<b64>` where the
+        base64 payload decodes to `<frontend-api-host>$`. We decode it so the
+        template can build the ClerkJS <script> src without a second env var.
+        Returns "" if the key is absent or unparsable.
+        """
+        key = self.clerk_publishable_key
+        if not key:
+            return ""
+        try:
+            # Strip the "pk_test_" / "pk_live_" prefix, leaving the b64 payload.
+            payload = key.split("_", 2)[2]
+            # base64 may need padding restored before decoding.
+            padded = payload + "=" * (-len(payload) % 4)
+            decoded = base64.b64decode(padded).decode("utf-8")
+            return decoded.rstrip("$")
+        except (IndexError, ValueError):
+            logger.warning(
+                "Could not parse Frontend API host from CLERK_PUBLISHABLE_KEY"
+            )
+            return ""
 
 
 settings = Settings()

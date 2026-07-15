@@ -377,3 +377,24 @@ tr:hover { background: rgba(255,255,255,0.02); }
 .mt-2 { margin-top: 1rem; }
 .mb-1 { margin-bottom: 0.5rem; }
 .mb-2 { margin-bottom: 1rem; }
+
+/* ── Auth (Clerk backend) ────────────────────────────── */
+.sidebar-user {
+    margin-top: auto;
+    padding: 1rem 0 0.5rem;
+}
+
+.signin-wrap {
+    max-width: 420px;
+    margin: 3rem auto;
+    text-align: center;
+}
+
+.signin-wrap h1 {
+    margin-bottom: 1.5rem;
+}
+
+.signin-wrap #clerk-sign-in {
+    display: flex;
+    justify-content: center;
+}

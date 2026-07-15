@@ -21,8 +21,11 @@ psycopg2-binary>=2.9,<3.0
 # Configuration
 pydantic-settings>=2.2,<3.0
 
-# HTTP client (eBay API calls)
+# HTTP client (eBay API calls; also used to adapt requests for Clerk)
 httpx>=0.27,<1.0
+
+# Auth — Clerk backend (Phase 2; used only when AUTH_BACKEND=clerk)
+clerk-backend-api>=6.0,<7.0
 
 # Testing
 pytest>=8.0,<9.0

@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block title %}Sign in — OEMPartsAgent{% endblock %}
+
+{% block content %}
+<div class="signin-wrap">
+    <h1>Sign in</h1>
+    <div id="clerk-sign-in"></div>
+</div>
+{% endblock %}
+
+{% block clerk_script %}
+<script>
+    // Sign-in page: mount Clerk's embedded sign-in widget. If the visitor is
+    // already signed in, bounce them to the dashboard.
+    window.addEventListener('load', async function () {
+        await Clerk.load({ ui: { ClerkUI: window.__internal_ClerkUICtor } });
+        if (Clerk.user) {
+            window.location.href = '/';
+            return;
+        }
+        Clerk.mountSignIn(document.getElementById('clerk-sign-in'), {
+            afterSignInUrl: '/',
+            afterSignUpUrl: '/',
+        });
+    });
+</script>
+{% endblock %}
