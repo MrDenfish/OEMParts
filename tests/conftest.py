@@ -1,8 +1,9 @@
 """Shared test fixtures for OEMParts.
 
-Uses the real local Postgres database (oemparts_test) for integration tests.
-Falls back to the main database with a test-prefixed schema if oemparts_test
-is not available.
+Uses the dedicated local Postgres database ``oemparts_test`` for integration
+tests. There is deliberately NO fallback to the main database: the fixtures
+run ``drop_all`` after each test, so pointing at the real DB would destroy
+data. If ``oemparts_test`` is unavailable the tests fail to connect (by design).
 """
 
 import pytest
