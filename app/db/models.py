@@ -138,6 +138,14 @@ class Search(Base):
         nullable=False,
         comment="When true and oem_number is set, drop listings whose title doesn't contain OEM, Genuine, or the OEM number",
     )
+    category_id: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+        comment="Resolved eBay leaf category for compatibility_filter; NULL = fallback query-enrichment mode",
+    )
+    category_name: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, comment="Display name of the resolved category"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
     )
