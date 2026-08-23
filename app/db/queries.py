@@ -163,6 +163,8 @@ def create_search(
     condition_filter: str | None = None,
     is_high_priority: bool = False,
     oem_only: bool = False,
+    category_id: str | None = None,
+    category_name: str | None = None,
 ) -> Search:
     """Create a new search for a user."""
     search = Search(
@@ -174,6 +176,8 @@ def create_search(
         condition_filter=condition_filter,
         is_high_priority=is_high_priority,
         oem_only=oem_only,
+        category_id=category_id,
+        category_name=category_name,
     )
     db.add(search)
     db.flush()

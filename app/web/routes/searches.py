@@ -9,11 +9,19 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user
+from app.core.compatibility import resolve_fitment_category
 from app.core.search_runner import run_single_search
 from app.db import queries
 from app.db.models import User
 from app.db.session import get_db
-from app.web.main import templates
+
+# `templates` is intentionally NOT imported at module level here: app.web.main
+# imports this module (to register `router`) as part of building the app, so
+# a module-level `from app.web.main import templates` creates a circular
+# import that breaks if anything ever imports app.web.routes.searches
+# directly, before app.web.main has been loaded (some tests do this). Each
+# handler that needs it imports it locally instead — see conftest.py's
+# `client` fixture for the same pattern.
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +35,8 @@ def searches_page(
     db: Session = Depends(get_db),
 ):
     """Full page listing all searches, grouped by vehicle."""
+    from app.web.main import templates
+
     vehicles = queries.get_vehicles_for_user(db, current_user.id)
     user_searches = queries.get_searches_for_user(db, current_user.id)
 
@@ -63,6 +73,8 @@ def create_search(
     db: Session = Depends(get_db),
 ):
     """Create a new part search."""
+    from app.web.main import templates
+
     # Parse max_price safely
     parsed_price: Decimal | None = None
     if max_price and max_price.strip():
@@ -85,6 +97,21 @@ def create_search(
     # since that's the case where it most reliably trims aftermarket noise.
     default_oem_only = parsed_oem_number is not None
 
+    # Resolve an eBay fitment category from the query text. Inline eBay
+    # call — sanctioned by the taxonomy exception in CLAUDE.md. Failure
+    # must never block search creation; NULL just means fallback mode.
+    category_id: str | None = None
+    category_name: str | None = None
+    try:
+        resolved = resolve_fitment_category(db, query_text.strip())
+        if resolved is not None:
+            category_id = resolved.category_id
+            category_name = resolved.category_name
+    except Exception:
+        logger.exception(
+            "Category resolution errored for query '%s'", query_text.strip()
+        )
+
     search = queries.create_search(
         db,
         user_id=current_user.id,
@@ -95,6 +122,8 @@ def create_search(
         condition_filter=parsed_condition,
         is_high_priority=is_high_priority,
         oem_only=default_oem_only,
+        category_id=category_id,
+        category_name=category_name,
     )
     db.commit()
     db.refresh(search)
@@ -129,6 +158,8 @@ def toggle_search(
     db: Session = Depends(get_db),
 ):
     """Toggle a search between active and inactive."""
+    from app.web.main import templates
+
     search = queries.toggle_search_active(db, search_id, current_user.id)
     db.commit()
 
@@ -153,6 +184,8 @@ def toggle_search_oem_only(
     db: Session = Depends(get_db),
 ):
     """Toggle a search's OEM-only title filter."""
+    from app.web.main import templates
+
     search = queries.toggle_search_oem_only(db, search_id, current_user.id)
     db.commit()
 
@@ -177,6 +210,8 @@ def fetch_search(
     db: Session = Depends(get_db),
 ):
     """Trigger an immediate fetch for a single search."""
+    from app.web.main import templates
+
     search = queries.get_search_by_id(db, search_id, current_user.id)
     if search is None:
         return Response(status_code=404, content="Search not found")
