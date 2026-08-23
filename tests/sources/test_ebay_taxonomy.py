@@ -5,6 +5,7 @@ in-process tree-id caching, and taxonomy_cache read-through behavior.
 """
 
 import json
+from unittest.mock import Mock
 
 import pytest
 from sqlalchemy.orm import Session
@@ -165,3 +166,45 @@ def test_compatibility_properties_unsupported_category_cached_empty(
         lambda db, path, params: (_ for _ in ()).throw(AssertionError("no API call")),
     )
     assert ebay_taxonomy.get_compatibility_properties(db_session, "11700") == []
+
+
+def test_request_json_returns_none_on_json_parse_error(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that malformed JSON in a 200 response is handled gracefully."""
+
+    def fake_client_context():
+        response = Mock()
+        response.status_code = 200
+        response.json.side_effect = ValueError("Expecting value")
+        client = Mock()
+        client.get.return_value = response
+        client.__enter__ = Mock(return_value=client)
+        client.__exit__ = Mock(return_value=None)
+        return client
+
+    import httpx
+
+    monkeypatch.setattr(
+        httpx,
+        "Client",
+        lambda: fake_client_context(),
+    )
+
+    # Monkeypatch get_ebay_token to avoid DB calls
+    monkeypatch.setattr(ebay_taxonomy, "get_ebay_token", lambda db: "test_token")
+
+    result = ebay_taxonomy._request_json(db_session, "/test_path", {"test": "param"})
+    assert result is None
+
+    # Verify the API quota was logged despite the error
+    from app.db.models import ApiQuotaLog
+
+    log_entry = (
+        db_session.query(ApiQuotaLog)
+        .filter(ApiQuotaLog.provider == "ebay_taxonomy")
+        .order_by(ApiQuotaLog.id.desc())
+        .first()
+    )
+    assert log_entry is not None
+    assert log_entry.status_code == 200

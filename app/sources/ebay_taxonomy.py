@@ -85,7 +85,15 @@ def _request_json(db: Session, path: str, params: dict[str, str]) -> dict | None
                 response.text[:200],
             )
             return None
-        return response.json()
+        try:
+            return response.json()
+        except ValueError as exc:
+            logger.warning(
+                "eBay Taxonomy API returned invalid JSON for %s: %s",
+                path,
+                exc,
+            )
+            return None
     except httpx.HTTPError as exc:
         logger.warning("eBay Taxonomy API error for %s: %s", path, exc)
         _log_api_call(db, status_code)
