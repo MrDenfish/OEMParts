@@ -104,3 +104,62 @@ def test_non_200_with_filter_raises_fitment_error(db_session: Session) -> None:
 def test_non_200_without_filter_returns_empty(db_session: Session) -> None:
     FakeClient.response = FakeResponse(500, {"errors": []})
     assert search_ebay(db_session, query="water pump") == []
+
+
+def test_rate_limit_with_filter_returns_empty_without_raising(
+    db_session: Session,
+) -> None:
+    """A 429 (or 5xx) must not trigger the fitment retry's second API call."""
+    FakeClient.response = FakeResponse(
+        429, {"errors": [{"errorId": 10001, "message": "rate limit exceeded"}]}
+    )
+    result = search_ebay(
+        db_session,
+        query="water pump",
+        compatibility_filter="Year:2012;Make:Land Rover;Model:LR4",
+        category_ids="184656",
+    )
+    assert result == []
+
+
+def test_server_error_with_filter_returns_empty_without_raising(
+    db_session: Session,
+) -> None:
+    FakeClient.response = FakeResponse(500, {"errors": []})
+    result = search_ebay(
+        db_session,
+        query="water pump",
+        compatibility_filter="Year:2012;Make:Land Rover;Model:LR4",
+        category_ids="184656",
+    )
+    assert result == []
+
+
+class MalformedJsonResponse:
+    """A response whose .json() raises, mimicking a malformed body."""
+
+    def __init__(self, status_code: int):
+        self.status_code = status_code
+        self.text = "not json"
+
+    def json(self) -> dict:
+        raise ValueError("Expecting value: line 1 column 1 (char 0)")
+
+
+def test_200_with_malformed_json_returns_empty(db_session: Session) -> None:
+    FakeClient.response = MalformedJsonResponse(200)
+    assert search_ebay(db_session, query="water pump") == []
+
+
+def test_non_200_with_malformed_json_and_filter_returns_empty(
+    db_session: Session,
+) -> None:
+    """Malformed error body with compatibility_filter set must not raise."""
+    FakeClient.response = MalformedJsonResponse(400)
+    result = search_ebay(
+        db_session,
+        query="water pump",
+        compatibility_filter="Year:2012;Make:Land Rover;Model:LR4",
+        category_ids="184656",
+    )
+    assert result == []

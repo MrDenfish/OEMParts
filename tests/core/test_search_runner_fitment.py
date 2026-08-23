@@ -94,6 +94,10 @@ def test_fitment_error_falls_back_once(
     # Category stays in place — transient eBay problems shouldn't erase it
     db_session.refresh(test_search)
     assert test_search.category_id == "184656"
+    # The retry ran in fallback mode, so the persisted listing must not be
+    # marked as fitment-checked.
+    listing = db_session.query(Listing).filter_by(ebay_item_id="v1|1|0").one()
+    assert listing.compatibility_checked is False
 
 
 def test_fitment_mode_sets_compatibility_checked(

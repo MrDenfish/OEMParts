@@ -70,8 +70,9 @@ def run_single_search(db: Session, search: Search) -> SearchResult:
             api_calls = 1
         except FitmentFilterError:
             logger.warning(
-                "eBay rejected fitment filter for search '%s' (category %s); "
+                "eBay rejected fitment filter for search %s '%s' (category %s); "
                 "retrying without filter",
+                search.id,
                 search.query_text,
                 search.category_id,
             )
