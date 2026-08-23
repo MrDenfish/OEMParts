@@ -4,10 +4,27 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.core.compatibility import ResolvedCategory
 from app.core.search_runner import SearchResult
 from app.db.models import Search, Vehicle
 from app.web.routes import searches as searches_module
+
+
+@pytest.fixture(autouse=True)
+def _force_basic_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the basic-auth backend for every test in this module.
+
+    ``settings`` is a module-level singleton that loads ``AUTH_BACKEND`` from
+    the developer's ``.env``. Without this, running the suite while ``.env`` has
+    ``AUTH_BACKEND=clerk`` (e.g. mid-Clerk-testing) makes these tests exercise
+    the Clerk path: the ``client`` fixture's HTTP Basic credentials don't
+    authenticate, so the 401 becomes a 302 redirect to ``/sign-in`` and the
+    assertions in ``_create`` break. The backend is read at request time, so
+    patching the singleton is enough. See ``tests/auth/test_basic.py`` for
+    the same pattern.
+    """
+    monkeypatch.setattr(settings, "auth_backend", "basic")
 
 
 @pytest.fixture(autouse=True)
