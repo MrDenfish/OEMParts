@@ -3,7 +3,7 @@
 > **Audience:** Developers, AI assistants, and outside collaborators.
 > **How to use:** Read top-to-bottom for full context, or jump to a section. If you're an AI assistant starting a new conversation, this is your single-source briefing.
 > **Keeping it current:** Update the [Changelog](#changelog) at the bottom whenever significant changes ship. Stale docs are worse than no docs.
-> **Status:** Phase 1 MVP complete (2026-04-26). All core components implemented and validated end-to-end with real eBay data. See [Changelog](#changelog) for details.
+> **Status:** Phase 2 in progress. Phase 1 MVP complete (2026-04-26) and validated end-to-end with real eBay data. First Phase 2 item — Clerk auth — merged to `main` 2026-07-15 (PR #1). Remaining Phase 2: EC2 deployment, VIN decoding, taxonomy Y/M/M dropdowns + compatibility_filter, cron-driven fetch cycles. See [Changelog](#changelog) for details.
 
 ---
 
@@ -81,6 +81,7 @@ OEMPartsAgent/
 │   ├── core/                        # Business logic
 │   │   ├── search_runner.py         #   Execute searches, persist listings
 │   │   ├── deduplicator.py          #   Cross-user query sharing
+│   │   ├── oem_filter.py            #   OEM-only title filter (post-fetch)
 │   │   ├── affiliate.py             #   EPN URL construction
 │   │   ├── compatibility.py         #   Fitment filter builder
 │   │   ├── price_tracker.py         #   Price history + delta detection
@@ -291,7 +292,7 @@ PYTHONPATH=$PWD uvicorn app.web.main:app --host 0.0.0.0 --port 8000 --reload
 - Dashboard routes and templates (`app/web/routes/`, `app/web/templates/`) — isolated UI components
 - Listing normalization rules (`app/core/search_runner.py`) — additive, easy to tune
 - OEM-only title filter heuristics (`app/core/oem_filter.py`) — covered by unit tests, isolated, easy to refine without ripple
-- Scheduled fetch times (`docker/entrypoint.worker.sh`) — adjust cadence freely
+- Scheduled fetch times (`docker/entrypoint.worker.sh` — planned; file arrives with Phase 2 cron work) — adjust cadence freely
 - Configuration defaults (`app/config.py`)
 
 ### Change With Care
@@ -337,8 +338,8 @@ Deployment: Local Docker Compose only. Not yet on EC2.
 **Exit:** Owner can track 20+ parts for the LR4 locally, fetch cycles run reliably via CLI, dashboard renders real eBay listings with working filters. **Completed 2026-04-26.**
 **Note:** compatibility_filter requires leaf-level eBay category IDs (taxonomy module, Phase 2+). Phase 1 workaround: vehicle year/make/model prepended to search query text.
 
-### Phase 2 — Multi-Tenancy + Deployment (~2 weekends)
-Add Clerk auth integration. Migrate `basic.py` auth to `clerk.py`. Activate real multi-user pathways (signup, login, logout). Deploy to EC2 with Docker Compose, Caddy reverse proxy, SSL for oempartsagent.com. Add VIN decoding via NHTSA. Add cascading Y/M/M dropdowns via eBay Taxonomy API. Invite 2-3 friends with different vehicles to stress-test.
+### Phase 2 — Multi-Tenancy + Deployment (~2 weekends, in progress)
+Clerk auth integration (**done 2026-07-14, merged via PR #1** — `basic.py` and `clerk.py` are both live; `AUTH_BACKEND` env var selects, `basic` remains the local default). Deploy to EC2 with Docker Compose, Caddy reverse proxy, SSL for oempartsagent.com. Add VIN decoding via NHTSA. Add cascading Y/M/M dropdowns via eBay Taxonomy API. Add taxonomy-based `compatibility_filter` (replaces the Phase 1 query-text workaround). Move fetch cycles to cron in the worker container (currently CLI-only). Invite 2-3 friends with different vehicles to stress-test.
 **Exit:** 3+ users with different vehicles using the live site for 2 weeks without major incidents.
 
 ### Phase 3 — Alerts + EPN Monetization (~2-3 weekends)
@@ -477,16 +478,15 @@ Initial launch US-only (`EBAY_MARKETPLACE_ID=EBAY_US`, NHTSA VIN decode is US-sp
 
 ### Completed
 - **Phase 0:** Specification, scaffolding, eBay developer account, domain acquisition
-- **Phase 1:** Full single-user MVP — OAuth, Browse API, search runner, dedup, CLI, dashboard (4 pages), condition filtering, auto-fetch, 19 passing tests
+- **Phase 1:** Full single-user MVP — OAuth, Browse API, search runner, dedup, CLI, dashboard (4 pages), condition filtering, auto-fetch, OEM-only title filter; committed and pushed to GitHub (`MrDenfish/OEMParts`)
+- **Phase 2 (first item):** Clerk auth integration — merged to `main` 2026-07-15 via PR #1 (merge commit `b84685c`); validated live locally, 36 tests passing (see Changelog)
 
 ### Next Up (Phase 2 — multi-tenancy + deployment)
-- ~~Clerk auth integration (swap `basic.py` for `clerk.py`)~~ — **done 2026-07-14, working locally, pending commit** (see Changelog)
 - EC2 deployment with Docker Compose, Caddy reverse proxy, SSL for oempartsagent.com
 - VIN decoding via NHTSA
 - Y/M/M cascading dropdowns via Taxonomy API
 - Taxonomy-based compatibility_filter (replace Phase 1 query enrichment workaround)
 - Cron-driven fetch cycles (currently CLI-only)
-- Commit and push Phase 1 code to GitHub
 
 ### Backlog (Phase 3+)
 - Email alerts via AWS SES (price drops, new listings)
@@ -523,8 +523,9 @@ All significant changes to the system should be logged here. Format: `YYYY-MM-DD
 
 | Date | Change | Details |
 |------|--------|---------|
+| 2026-07-15 | **Clerk auth merged to `main`** (PR #1, merge commit `b84685c`) | The `phase2/clerk-auth` branch was deleted after merge (local + origin). Follow-up commit `c99920f` fixed a stale docstring in `tests/conftest.py` (the suite requires the dedicated `oemparts_test` DB and deliberately has no main-DB fallback). |
 | 2026-07-14 | **Clerk auth backend (Phase 2) — implemented, working locally, committed** (`10827e8` on branch `phase2/clerk-auth`, PR #1) | Embedded ClerkJS **v6** (loads `@clerk/ui@1` + `@clerk/clerk-js@6`) + `clerk-backend-api` **6.0.1**. `AUTH_BACKEND` env selects `basic` (default, Phase 1) vs `clerk`; `get_current_user` in `app/auth/dependencies.py` dispatches. New `app/auth/clerk.py`: verifies the `__session` cookie via `authenticate_request`, provisions a local `User` by Clerk `sub` (→ `auth_provider_id`), backfills email from the Clerk Backend API on first login. **No DB migration** (the `users.auth_provider_id` column already existed). `config.py` adds `clerk_secret_key`/`clerk_publishable_key`/`clerk_authorized_parties` (+ derived `clerk_frontend_api` from the pub key, and `clerk_authorized_parties_list`). New `/sign-in` route + `pages/sign_in.html` (embedded `mountSignIn`); `base.html` mounts `UserButton`; 401→`/sign-in` redirect handler in `main.py` (HX-Redirect for HTMX). New `tests/auth/test_clerk.py` (provision_user, mocked client). Also hardened `tests/auth/test_basic.py` with an autouse fixture pinning `AUTH_BACKEND=basic` per-test so the suite is hermetic regardless of the developer's `.env` (previously, `.env` left on `clerk` made the basic-auth tests run the Clerk path — 401→302 redirect to `/sign-in`, followed by TestClient → 200 — and fail spuriously). Validated live: sign-in → create search → results. Full suite green: **36 passed**. **Gotcha:** `CLERK_AUTHORIZED_PARTIES` must list BOTH `http://localhost:8000` and `http://127.0.0.1:8000` or you get a `/sign-in`↔`/` redirect loop (uvicorn serves on 127.0.0.1; Clerk treats it as a distinct origin). **Committed** as `10827e8` on branch `phase2/clerk-auth` (opened as PR #1 against `main`). See memory `clerk_local_dev_gotchas`. |
-| 2026-04-21 | **SYSTEM_CONTEXT.md created** | Initial specification document (Phase 0). Project conceived as personal parts tracker for 2012 Land Rover LR4, architected for commercial multi-tenant expansion. Domain oempartsagent.com acquired. Stack decision: FastAPI + HTMX + Jinja2 + PostgreSQL + Docker Compose on AWS EC2, mirroring StockAgent operational patterns. Monetization via eBay Partner Network only. Phase 0 gate: spec sign-off, repo scaffolding, credentials acquisition. |
-| 2026-04-21 | **Phase 1 scaffolding created** | Full project skeleton per Section 3. SQLAlchemy models for all 12 tables (Section 7). Initial Alembic migration (`862710ad10dd`) generated and verified (upgrade/downgrade/upgrade). `docker-compose.local.yml` for local Postgres 15 on port 5442. `.env.example` aligned to Section 11 (replaced StockAgent template). `requirements.txt` with initial dependencies. `app/config.py` with Pydantic Settings. No application logic — skeleton only. Note: `user_preferences` and `subscriptions` (mentioned in Section 6) not modeled; they are not defined in Section 7 and are deferred to later phases. |
 | 2026-04-28 | **OEM-only title filter** | Added `oem_only` boolean column to `searches` (migration `50028b2596f2`), defaulting to `false` for existing rows and to `true` for newly created searches that include an OEM number. New module `app/core/oem_filter.py` keeps a listing only if its title contains the word "OEM", the word "Genuine", or the normalized OEM part number itself (with hyphens/spaces stripped, ≥4 chars to avoid collisions). Filter applied post-fetch in `search_runner.py` because the eBay Browse API has no native title-must-contain filter. Web UI: new "OEM-only" column in the searches table with a per-row On/Off toggle button (`PATCH /searches/{id}/toggle-oem-only`). 14 new unit tests; 33 tests passing total. |
 | 2026-04-26 | **Phase 1 MVP complete** | Full single-user MVP implemented and validated with real eBay data. **Database:** `session.py` (get_db + get_session), `queries.py` (25+ functions), `seed_dev_user.py`. Migration `2ef816902a3e` adds `condition_filter` to searches table. **Auth:** HTTP Basic with session cookie (`basic.py`, `dependencies.py`), auto-creates user on first login. **eBay integration:** OAuth client-credentials with 3-tier caching (`ebay_oauth.py`), Browse API search with condition filtering (`ebay_browse.py`). Note: `compatibility_filter` requires leaf-level category IDs — Phase 1 workaround prepends vehicle year/make/model to query text. **Business logic:** `search_runner.py`, `deduplicator.py` (TTL-based), `price_tracker.py`, `compatibility.py`. **CLI:** `./oemparts fetch/cleanup/health` via argparse. Manual cycles bypass dedup. **Dashboard:** Dark-themed FastAPI + HTMX. Pages: Home (stats), Vehicles (CRUD), Searches (CRUD + "Fetch Now" button + auto-fetch on create + condition filter), Listings (filters + pagination), Price History. HTMX partials for inline updates. **Tests:** 19 passing (auth, compatibility, dedup, queries, routes) against dedicated `oemparts_test` database. **Validation:** 249 real eBay listings fetched across 5 searches for 2012 Land Rover LR4. |
+| 2026-04-21 | **Phase 1 scaffolding created** | Full project skeleton per Section 3. SQLAlchemy models for all 12 tables (Section 7). Initial Alembic migration (`862710ad10dd`) generated and verified (upgrade/downgrade/upgrade). `docker-compose.local.yml` for local Postgres 15 on port 5442. `.env.example` aligned to Section 11 (replaced StockAgent template). `requirements.txt` with initial dependencies. `app/config.py` with Pydantic Settings. No application logic — skeleton only. Note: `user_preferences` and `subscriptions` (mentioned in Section 6) not modeled; they are not defined in Section 7 and are deferred to later phases. |
+| 2026-04-21 | **SYSTEM_CONTEXT.md created** | Initial specification document (Phase 0). Project conceived as personal parts tracker for 2012 Land Rover LR4, architected for commercial multi-tenant expansion. Domain oempartsagent.com acquired. Stack decision: FastAPI + HTMX + Jinja2 + PostgreSQL + Docker Compose on AWS EC2, mirroring StockAgent operational patterns. Monetization via eBay Partner Network only. Phase 0 gate: spec sign-off, repo scaffolding, credentials acquisition. |
