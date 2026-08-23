@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.core.compatibility import ResolvedCategory
 from app.core.search_runner import SearchResult
-from app.db.models import Search, Vehicle
+from app.db.models import Search, User, Vehicle
 from app.web.routes import searches as searches_module
 
 
@@ -25,6 +25,36 @@ def _force_basic_auth(monkeypatch: pytest.MonkeyPatch) -> None:
     the same pattern.
     """
     monkeypatch.setattr(settings, "auth_backend", "basic")
+
+
+@pytest.fixture()
+def client(db_session: Session, test_user: User) -> TestClient:
+    """Provide an authenticated test client as the test_user.
+
+    Overrides the global client fixture to use get_current_user directly,
+    bypassing basic auth verification, so the test_user is always logged in.
+    """
+    from app.auth.dependencies import get_current_user
+    from app.db.session import get_db
+    from app.web.main import app
+
+    def override_get_db():
+        try:
+            yield db_session
+        finally:
+            pass
+
+    def override_get_current_user():
+        return test_user
+
+    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_user] = override_get_current_user
+
+    test_client = TestClient(app)
+
+    yield test_client
+
+    app.dependency_overrides.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -96,3 +126,21 @@ def test_create_survives_resolution_raising(
     _create(client, test_vehicle)  # must still succeed
     search = db_session.query(Search).filter_by(query_text="water pump").one()
     assert search.category_id is None
+
+
+def test_searches_page_shows_category_column(
+    client: TestClient,
+    db_session: Session,
+    test_vehicle: Vehicle,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        searches_module,
+        "resolve_fitment_category",
+        lambda db, q: ResolvedCategory("184656", "Water Pumps"),
+    )
+    _create(client, test_vehicle)
+    page = client.get("/searches/")
+    assert page.status_code == 200
+    assert "Water Pumps" in page.text
+    assert "<th>Category</th>" in page.text

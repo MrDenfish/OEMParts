@@ -17,6 +17,13 @@
             {{ 'On' if search.oem_only else 'Off' }}
         </button>
     </td>
+    <td class="text-secondary">
+        {% if search.category_name %}
+            <span title="eBay fitment filtering active (category {{ search.category_id }})">{{ search.category_name }}</span>
+        {% else %}
+            <span title="No eBay fitment category — using vehicle keywords in the query">—</span>
+        {% endif %}
+    </td>
     <td>{{ search.max_price|format_price if search.max_price else '—' }}</td>
     <td>{{ search.condition_filter or 'Any' }}</td>
     <td>
