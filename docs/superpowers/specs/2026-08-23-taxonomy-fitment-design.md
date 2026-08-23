@@ -204,15 +204,17 @@ runs after fetching in both modes.
 Stale docstrings in `search_runner` and `ebay_browse` are corrected as part
 of this work.
 
-### 5.6 Deduplication — `deduplicator.py` (change-with-care)
+### 5.6 Deduplication — no change required (verified during planning)
 
-The dedup cache key must incorporate the fetch shape, not just the query
-text: two searches with the same query and vehicle must share a fetch
-**only** when they also share the same `category_id` (including both-NULL).
-Otherwise a fitment-filtered result set could be served to a fallback-mode
-search or vice versa. Per SYSTEM_CONTEXT §9, this module requires a
-multi-user test: two users, same query/vehicle/category → shared fetch;
-same query/vehicle, different category state → separate fetches.
+SYSTEM_CONTEXT §5 describes cross-user fetch sharing keyed on normalized
+query + vehicle, but the actual `deduplicator.py` implements only a
+per-search TTL check on `last_fetched_at` (`should_skip_search`) — there is
+no cross-search cache key and no fetch sharing between searches. A skipped
+search reuses its *own* prior results, which remain correct under this
+feature. Therefore no deduplicator change is needed. If cross-search fetch
+sharing is ever actually implemented, its key must include `category_id`
+(including the both-NULL case) so fitment-filtered and fallback result sets
+can never be served interchangeably.
 
 ### 5.7 UI
 
@@ -237,7 +239,7 @@ via httpx mocking (no live calls in the suite):
 4. **Search runner:** fitment mode sends bare query + category_ids + filter;
    fallback mode sends enriched query and no filter; 12xxx error triggers
    one fallback retry; `compatibility_checked` set only in fitment mode.
-5. **Deduplicator:** the multi-user scenarios from §5.6.
+5. **Deduplicator:** no new tests — no change is made (see §5.6).
 6. **Migration:** upgrade → columns exist and are NULL; downgrade clean.
 7. **CLI:** `taxonomy-sync` resolves missing categories, `--all` re-resolves,
    output table correct (resolution mocked).
