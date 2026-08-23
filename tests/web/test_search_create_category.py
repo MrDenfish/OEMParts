@@ -28,11 +28,12 @@ def _force_basic_auth(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture()
-def client(db_session: Session, test_user: User) -> TestClient:
+def authed_client(db_session: Session, test_user: User) -> TestClient:
     """Provide an authenticated test client as the test_user.
 
-    Overrides the global client fixture to use get_current_user directly,
-    bypassing basic auth verification, so the test_user is always logged in.
+    Uses get_current_user dependency override to return test_user directly,
+    so the client is always authenticated as test_user. This is needed for
+    tests that verify page display for a specific user's data.
     """
     from app.auth.dependencies import get_current_user
     from app.db.session import get_db
@@ -129,7 +130,7 @@ def test_create_survives_resolution_raising(
 
 
 def test_searches_page_shows_category_column(
-    client: TestClient,
+    authed_client: TestClient,
     db_session: Session,
     test_vehicle: Vehicle,
     monkeypatch: pytest.MonkeyPatch,
@@ -139,8 +140,8 @@ def test_searches_page_shows_category_column(
         "resolve_fitment_category",
         lambda db, q: ResolvedCategory("184656", "Water Pumps"),
     )
-    _create(client, test_vehicle)
-    page = client.get("/searches/")
+    _create(authed_client, test_vehicle)
+    page = authed_client.get("/searches/")
     assert page.status_code == 200
     assert "Water Pumps" in page.text
     assert "<th>Category</th>" in page.text
