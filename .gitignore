@@ -44,3 +44,7 @@ alembic/__pycache__/
 
 # Docker volumes (if mounted locally)
 pgdata/
+
+# Local app launcher (setup.sh / scripts/launch_local.sh)
+logs/
+.run/
