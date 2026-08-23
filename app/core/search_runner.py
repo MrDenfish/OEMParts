@@ -9,11 +9,12 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
+from app.core.compatibility import build_compatibility_filter
 from app.core.oem_filter import title_matches_oem
 from app.core.price_tracker import record_price_and_detect_change
 from app.db import queries
 from app.db.models import Search
-from app.sources.ebay_browse import search_ebay
+from app.sources.ebay_browse import FitmentFilterError, search_ebay
 
 logger = logging.getLogger(__name__)
 
@@ -34,33 +35,63 @@ def run_single_search(db: Session, search: Search) -> SearchResult:
     """Execute one search against the Browse API and persist results.
 
     Steps:
-      1. Build compatibility filter from the search's vehicle
-      2. Call Browse API
-      3. For each returned listing: upsert, link to search, record price
-      4. Update search.last_fetched_at
-      5. Return summary stats
+      1. Fitment mode (search.category_id set): bare query + category_ids +
+         compatibility_filter. Fallback mode (NULL, or eBay rejects the
+         filter): vehicle year/make/model prepended to the query text.
+      2. For each returned listing: upsert, link to search, record price
+      3. Update search.last_fetched_at
+      4. Return summary stats
     """
     vehicle = search.vehicle
     listings_new = 0
     listings_updated = 0
     errors = 0
 
-    # Phase 1: Include vehicle details in query text instead of using
-    # compatibility_filter, which requires a specific leaf-level category ID.
-    # Proper fitment filtering via compatibility_filter + taxonomy lookup
-    # will be added when the taxonomy module is implemented.
     enriched_query = (
         f"{vehicle.year} {vehicle.make} {vehicle.model} {search.query_text}"
     )
 
-    # Call Browse API
-    normalized_listings = search_ebay(
-        db,
-        query=enriched_query,
-        max_price=search.max_price,
-        condition=search.condition_filter,
-    )
-    api_calls = 1  # One Browse API call per search
+    fitment_mode = False
+    if search.category_id:
+        # Fitment mode: eBay guarantees the part fits, so the query stays
+        # bare — listings that fit but don't name the vehicle now match.
+        try:
+            normalized_listings = search_ebay(
+                db,
+                query=search.query_text,
+                compatibility_filter=build_compatibility_filter(
+                    vehicle.year, vehicle.make, vehicle.model
+                ),
+                category_ids=search.category_id,
+                max_price=search.max_price,
+                condition=search.condition_filter,
+            )
+            fitment_mode = True
+            api_calls = 1
+        except FitmentFilterError:
+            logger.warning(
+                "eBay rejected fitment filter for search '%s' (category %s); "
+                "retrying without filter",
+                search.query_text,
+                search.category_id,
+            )
+            normalized_listings = search_ebay(
+                db,
+                query=enriched_query,
+                max_price=search.max_price,
+                condition=search.condition_filter,
+            )
+            api_calls = 2
+    else:
+        # Fallback mode (Phase 1 behavior): no resolved category, so the
+        # vehicle is folded into the query text instead.
+        normalized_listings = search_ebay(
+            db,
+            query=enriched_query,
+            max_price=search.max_price,
+            condition=search.condition_filter,
+        )
+        api_calls = 1
 
     # OEM-only title filter — applied after fetch since the Browse API
     # has no native title-must-contain-keyword filter.
@@ -97,6 +128,7 @@ def run_single_search(db: Session, search: Search) -> SearchResult:
                 image_url=normalized.image_url,
                 ebay_end_date=normalized.ebay_end_date,
                 category_id=normalized.category_id,
+                compatibility_checked=fitment_mode,
             )
 
             if is_new:
