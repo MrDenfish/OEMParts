@@ -114,6 +114,8 @@ def create_search(
     if settings.ai_filter_enabled and settings.anthropic_api_key:
         vehicle = queries.get_vehicle_by_id(db, vehicle_id, current_user.id)
         if vehicle is not None:
+            # category_name is None by design: crafting runs before
+            # category resolution below, so there's no category yet.
             crafted = craft_query(final_query, parsed_oem_number, vehicle, None)
             if crafted:
                 final_query = crafted

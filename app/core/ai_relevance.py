@@ -5,6 +5,10 @@ batching listing titles into part/accessory/unrelated verdicts via
 structured outputs — and craft_query, a one-shot query refinement at
 search creation. Every failure path returns None; callers treat None
 as "behave exactly as before". The API key is never logged.
+
+Listing titles are seller-controlled text interpolated into prompts;
+structured outputs (JSON schema, enum verdicts) bound the blast radius
+of a hostile title to a wrong verdict, not arbitrary model behavior.
 """
 
 import json
@@ -12,6 +16,7 @@ import logging
 import uuid
 
 import anthropic
+from anthropic.types.message_create_params import OutputConfigParam
 
 from app.config import settings
 from app.db.models import Listing, Search, Vehicle
@@ -54,6 +59,15 @@ def _client() -> anthropic.Anthropic:
     return anthropic.Anthropic(api_key=settings.anthropic_api_key)
 
 
+def _output_config(schema: dict) -> OutputConfigParam:
+    """effort is supported on Opus 4.5+/Sonnet 4.6+/Opus 5 tiers but errors
+    on Haiku 4.5 — omit it there so the documented cheap swap keeps working."""
+    config: OutputConfigParam = {"format": {"type": "json_schema", "schema": schema}}
+    if "haiku" not in settings.ai_model:
+        config["effort"] = "low"
+    return config
+
+
 def _first_text(response: object) -> str | None:
     """Extract the first text block, or None (refusal / empty content)."""
     if getattr(response, "stop_reason", None) == "refusal":
@@ -79,6 +93,9 @@ def classify_listings(
         f"OEM part number: {search.oem_number or 'none'}\n"
         f"eBay category: {search.category_name or 'unknown'}\n"
     )
+    vehicle = search.vehicle
+    if vehicle is not None:
+        intent += f"Vehicle: {vehicle.year} {vehicle.make} {vehicle.model}\n"
     prompt = (
         "You are classifying eBay listings for a car-parts tracking tool.\n"
         "The user's search describes ONE specific part they want to buy.\n\n"
@@ -92,20 +109,27 @@ def classify_listings(
         f"Listings:\n{lines}"
     )
 
+    # Thinking is on by default on current models and shares this budget
+    # with the JSON output — scale with batch size, capped at 16384, so
+    # large batches get headroom without over-budgeting small ones.
+    max_tokens = min(16384, 2048 + 60 * len(listings))
     try:
         response = _client().messages.create(
             model=settings.ai_model,
-            # Thinking is on by default on current models and shares this
-            # budget with the JSON output — leave headroom for both.
-            max_tokens=8192,
-            output_config={
-                "effort": "low",
-                "format": {"type": "json_schema", "schema": CLASSIFY_SCHEMA},
-            },
+            max_tokens=max_tokens,
+            output_config=_output_config(CLASSIFY_SCHEMA),
             messages=[{"role": "user", "content": prompt}],
         )
     except anthropic.APIError as exc:
         logger.warning("AI classification failed for search %s: %s", search.id, exc)
+        return None
+
+    if getattr(response, "stop_reason", None) == "max_tokens":
+        logger.warning(
+            "AI classification truncated (max_tokens) for search %s — %d listings",
+            search.id,
+            len(listings),
+        )
         return None
 
     text = _first_text(response)
@@ -163,10 +187,7 @@ def craft_query(
         response = _client().messages.create(
             model=settings.ai_model,
             max_tokens=1024,
-            output_config={
-                "effort": "low",
-                "format": {"type": "json_schema", "schema": CRAFT_SCHEMA},
-            },
+            output_config=_output_config(CRAFT_SCHEMA),
             messages=[{"role": "user", "content": prompt}],
         )
     except anthropic.APIError as exc:

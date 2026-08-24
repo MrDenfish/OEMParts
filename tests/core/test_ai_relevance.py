@@ -19,6 +19,7 @@ def make_search(**kw) -> Search:
         query_text="AMK air suspension compressor",
         oem_number="LR072537",
         category_name="Self-Leveling Suspension Parts",
+        vehicle=None,
     )
     defaults.update(kw)
     return Search(**defaults)  # type: ignore[arg-type]
@@ -61,7 +62,8 @@ def patch_client(monkeypatch: pytest.MonkeyPatch, response) -> MagicMock:
 
 class TestClassifyListings:
     def test_maps_verdicts_by_index(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        search = make_search()
+        vehicle = Vehicle(year=2012, make="Land Rover", model="LR4")  # type: ignore[call-arg]
+        search = make_search(vehicle=vehicle)
         listings = [
             make_listing("AMK compressor unit", "230.65"),
             make_listing("Bracket mount kit", "24.99"),
@@ -87,6 +89,7 @@ class TestClassifyListings:
         assert kwargs["model"] == "claude-opus-5"
         prompt = kwargs["messages"][0]["content"]
         assert "AMK compressor unit" in prompt and "LR072537" in prompt
+        assert "Land Rover" in prompt
 
     def test_empty_input_returns_empty_without_call(
         self, monkeypatch: pytest.MonkeyPatch
@@ -143,6 +146,37 @@ class TestClassifyListings:
             ai_relevance.classify_listings(make_search(), [make_listing("x", "1.00")])
             is None
         )
+
+    def test_truncated_response_returns_none(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        patch_client(
+            monkeypatch,
+            fake_response({"verdicts": []}, stop_reason="max_tokens"),
+        )
+        assert (
+            ai_relevance.classify_listings(make_search(), [make_listing("x", "1.00")])
+            is None
+        )
+
+    def test_effort_omitted_for_haiku(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(settings, "ai_model", "claude-haiku-4-5")
+        client = patch_client(
+            monkeypatch, fake_response({"verdicts": [{"index": 0, "verdict": "part"}]})
+        )
+        ai_relevance.classify_listings(make_search(), [make_listing("x", "1.00")])
+        kwargs = client.messages.create.call_args.kwargs
+        assert "effort" not in kwargs["output_config"]
+
+    def test_effort_included_for_default_model(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = patch_client(
+            monkeypatch, fake_response({"verdicts": [{"index": 0, "verdict": "part"}]})
+        )
+        ai_relevance.classify_listings(make_search(), [make_listing("x", "1.00")])
+        kwargs = client.messages.create.call_args.kwargs
+        assert kwargs["output_config"]["effort"] == "low"
 
     def test_non_object_json_returns_none(
         self, monkeypatch: pytest.MonkeyPatch
