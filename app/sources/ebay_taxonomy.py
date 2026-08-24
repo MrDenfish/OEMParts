@@ -32,6 +32,13 @@ TAXONOMY_CACHE_TTL = timedelta(days=30)
 # effectively static value — one API call per process lifetime).
 _tree_id_cache: str | None = None
 
+# Fitment (Motors parts) categories live in the eBay Motors category tree,
+# not the general marketplace tree. Verified live 2026-08-24: the EBAY_US
+# tree ("0") rejects Motors category ids (error 62005) and suggests
+# toy/collectible categories for part queries; EBAY_MOTORS_US resolves to
+# tree "100", whose suggestions match real Browse listing categories.
+FITMENT_TREE_MARKETPLACE_ID = "EBAY_MOTORS_US"
+
 
 @dataclass
 class CategorySuggestion:
@@ -101,14 +108,19 @@ def _request_json(db: Session, path: str, params: dict[str, str]) -> dict | None
 
 
 def get_default_tree_id(db: Session) -> str | None:
-    """Return the marketplace's category tree id (cached in-process)."""
+    """Return the eBay Motors category tree id used for fitment lookups.
+
+    Fitment (Motors parts) categories live in the separate eBay Motors tree,
+    not the general marketplace tree — see FITMENT_TREE_MARKETPLACE_ID.
+    Cached in-process (a small, effectively static value).
+    """
     global _tree_id_cache
     if _tree_id_cache is not None:
         return _tree_id_cache
     data = _request_json(
         db,
         "/get_default_category_tree_id",
-        {"marketplace_id": settings.ebay_marketplace_id},
+        {"marketplace_id": FITMENT_TREE_MARKETPLACE_ID},
     )
     if data is None or "categoryTreeId" not in data:
         return None

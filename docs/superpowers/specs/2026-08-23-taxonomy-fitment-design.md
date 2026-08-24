@@ -77,7 +77,7 @@ existing client-credentials token from `ebay_oauth.py` (base
 
 | Endpoint | Purpose | Caching |
 |----------|---------|---------|
-| `GET /get_default_category_tree_id?marketplace_id=EBAY_US` | The marketplace's category-tree id (a small static value) | In-process, like the OAuth token |
+| `GET /get_default_category_tree_id?marketplace_id=EBAY_MOTORS_US` (Motors tree, required for fitment categories — live-validation correction 2026-08-24) | The Motors category-tree id (a small static value) | In-process, like the OAuth token |
 | `GET /category_tree/{tree_id}/get_category_suggestions?q=<query>` | Ranked category suggestions for query text; each suggestion carries the category (id + name) and its ancestor path | Not cached — called once per search at creation/backfill; the result persisted on the search row *is* the cache |
 | `GET /category_tree/{tree_id}/get_compatibility_properties?category_id=<id>` | Which compatibility properties (Year/Make/Model/…) a category supports; an error or empty list means "no fitment support" | `taxonomy_cache` table, keyed (category_id, marketplace), response JSON in `raw_json`, `refreshed_at` for TTL |
 

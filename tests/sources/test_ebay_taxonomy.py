@@ -29,6 +29,7 @@ def test_get_default_tree_id_parses_and_caches(
 
     def fake_request(db, path, params):
         calls.append(path)
+        assert params == {"marketplace_id": "EBAY_MOTORS_US"}
         return {"categoryTreeId": "0", "categoryTreeVersion": "129"}
 
     monkeypatch.setattr(ebay_taxonomy, "_request_json", fake_request)
