@@ -576,3 +576,54 @@ def mark_alerts_notified(db: Session, alert_ids: list[uuid.UUID]) -> None:
         update(Alert).where(Alert.id.in_(alert_ids)).values(notified_at=utcnow())
     )
     db.flush()
+
+
+# ---------------------------------------------------------------------------
+# Relevance queries (AI filter — spec docs/superpowers/specs/2026-08-24-ai-*)
+# ---------------------------------------------------------------------------
+
+
+def get_unclassified_links(
+    db: Session, search_id: uuid.UUID, limit: int
+) -> list[SearchListing]:
+    """Unclassified links to active listings, oldest first, capped."""
+    return (
+        db.query(SearchListing)
+        .join(Listing, Listing.id == SearchListing.listing_id)
+        .filter(
+            SearchListing.search_id == search_id,
+            SearchListing.relevance.is_(None),
+            Listing.is_active.is_(True),
+        )
+        .order_by(SearchListing.matched_at)
+        .limit(limit)
+        .all()
+    )
+
+
+def set_link_relevance(
+    db: Session, search_id: uuid.UUID, listing_id: uuid.UUID, verdict: str
+) -> None:
+    """Persist an AI verdict on a (search, listing) link."""
+    db.execute(
+        update(SearchListing)
+        .where(
+            SearchListing.search_id == search_id,
+            SearchListing.listing_id == listing_id,
+        )
+        .values(relevance=verdict, relevance_checked_at=utcnow())
+    )
+    db.flush()
+
+
+def get_relevance_map(db: Session, search_id: uuid.UUID) -> dict[uuid.UUID, str]:
+    """listing_id -> verdict for a search's classified links."""
+    rows = (
+        db.query(SearchListing.listing_id, SearchListing.relevance)
+        .filter(
+            SearchListing.search_id == search_id,
+            SearchListing.relevance.is_not(None),
+        )
+        .all()
+    )
+    return {listing_id: relevance for listing_id, relevance in rows}

@@ -20,6 +20,7 @@ from email.message import EmailMessage
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.core.ai_relevance import classify_listings
 from app.core.oem_filter import title_contains_part_number
 from app.core.price_stats import (
     is_low_in_search,
@@ -33,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 DETAIL_CAP_PER_SEARCH = 5
 ALERT_DEDUP_DAYS = 7
+AI_CLASSIFY_CAP = 100
 
 # Snapshots are recorded once per fetch, not continuously. The nightly fetch
 # runs at 03:00 and the digest at 07:00, but a Mac asleep at 3 fetches on
@@ -50,6 +52,7 @@ class DigestSummary:
     alerts_created: int
     emails_sent: int
     skipped_reason: str | None = None
+    classified: int = 0
 
 
 def scan_and_record(
@@ -63,6 +66,7 @@ def scan_and_record(
         if not search.is_active:
             continue
         stats = search_price_stats(db, search.id)
+        relevance_map = queries.get_relevance_map(db, search.id)
         listings = queries.get_listings_for_search(db, search.id, active_only=True)
 
         for listing in listings:
@@ -78,9 +82,13 @@ def scan_and_record(
             if listing.first_seen_at >= window_start:
                 price = listing.price
                 assert isinstance(price, Decimal), "Listing.price must be Decimal"
-                notable = is_low_in_search(price, stats) or (
-                    search.oem_number is not None
-                    and title_contains_part_number(listing.title, search.oem_number)
+                verdict = relevance_map.get(listing.id)
+                notable = verdict not in ("accessory", "unrelated") and (
+                    is_low_in_search(price, stats)
+                    or (
+                        search.oem_number is not None
+                        and title_contains_part_number(listing.title, search.oem_number)
+                    )
                 )
                 if notable:
                     if not queries.recent_alert_exists(
@@ -95,6 +103,43 @@ def scan_and_record(
 
     db.commit()
     return created, other_new
+
+
+def classify_pending(db: Session, user_id: uuid.UUID) -> int:
+    """AI-classify unclassified (search, listing) links, one call per search.
+
+    Fail-open: disabled flag, missing key, or a failed call leaves links
+    NULL — tomorrow retries. Returns the number of verdicts persisted.
+    """
+    if not settings.ai_filter_enabled or not settings.anthropic_api_key:
+        return 0
+
+    classified = 0
+    for search in queries.get_searches_for_user(db, user_id):
+        if not search.is_active:
+            continue
+        links = queries.get_unclassified_links(db, search.id, AI_CLASSIFY_CAP)
+        if not links:
+            continue
+        if len(links) == AI_CLASSIFY_CAP:
+            logger.info(
+                "Classification cap (%d) hit for search %s; remainder tomorrow",
+                AI_CLASSIFY_CAP,
+                search.id,
+            )
+        listings = [
+            listing
+            for link in links
+            if (listing := db.get(Listing, link.listing_id)) is not None
+        ]
+        verdicts = classify_listings(search, listings)
+        if verdicts is None:
+            continue
+        for listing_id, verdict in verdicts.items():
+            queries.set_link_relevance(db, search.id, listing_id, verdict)
+            classified += 1
+        db.commit()
+    return classified
 
 
 def _fmt(price: Decimal) -> str:
@@ -221,6 +266,7 @@ def run_digest(db: Session) -> DigestSummary:
     """Scan, record, and email — one pass per user with active searches."""
     window_start = utcnow() - timedelta(days=1)
     total_created = 0
+    total_classified = 0
     emails_sent = 0
 
     if not settings.alerts_enabled:
@@ -230,6 +276,7 @@ def run_digest(db: Session) -> DigestSummary:
 
     users = db.query(User).all()
     for user in users:
+        total_classified += classify_pending(db, user.id)
         created, other_new = scan_and_record(db, user.id, window_start)
         total_created += created
 
@@ -253,4 +300,5 @@ def run_digest(db: Session) -> DigestSummary:
         alerts_created=total_created,
         emails_sent=emails_sent,
         skipped_reason=None,
+        classified=total_classified,
     )

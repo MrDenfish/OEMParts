@@ -28,6 +28,8 @@ def _digest_settings(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(settings, "smtp_password", "app-password")
     monkeypatch.setattr(settings, "digest_from", "test@example.com")
     monkeypatch.setattr(settings, "digest_to", "test@example.com")
+    monkeypatch.setattr(settings, "ai_filter_enabled", False)
+    monkeypatch.setattr(settings, "anthropic_api_key", "")
 
 
 def make_listing(
@@ -342,3 +344,87 @@ class TestSendEmail:
         smtp_cls = MagicMock(side_effect=OSError("connection refused"))
         monkeypatch.setattr(digest.smtplib, "SMTP", smtp_cls)
         assert digest.send_email("subj", "text", "<p>html</p>") is False
+
+
+class TestAIClassificationPass:
+    def _enable_ai(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(settings, "ai_filter_enabled", True)
+        monkeypatch.setattr(settings, "anthropic_api_key", "sk-test")
+
+    def test_classified_accessory_not_notable(
+        self, db_session: Session, test_user: User, test_search: Search
+    ) -> None:
+        """An accessory verdict demotes a would-be-notable new listing."""
+        seed_baseline(db_session, test_search)
+        cheap_new = make_listing(db_session, "50.00", days_old=0.1)  # below p25
+        link(db_session, test_search, cheap_new)
+        queries.set_link_relevance(
+            db_session, test_search.id, cheap_new.id, "accessory"
+        )
+        created, other = digest.scan_and_record(
+            db_session, test_user.id, utcnow() - timedelta(days=1)
+        )
+        assert created == 0
+        assert other[test_search.id] == 1  # counted, not alerted
+
+    def test_part_and_null_still_notable(
+        self, db_session: Session, test_user: User, test_search: Search
+    ) -> None:
+        seed_baseline(db_session, test_search)
+        classified = make_listing(db_session, "50.00", days_old=0.1)
+        link(db_session, test_search, classified)
+        queries.set_link_relevance(db_session, test_search.id, classified.id, "part")
+        unclassified = make_listing(db_session, "51.00", days_old=0.1)
+        link(db_session, test_search, unclassified)
+        created, _ = digest.scan_and_record(
+            db_session, test_user.id, utcnow() - timedelta(days=1)
+        )
+        assert created == 2
+
+    def test_classify_pending_persists_verdicts(
+        self,
+        db_session: Session,
+        test_user: User,
+        test_search: Search,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        self._enable_ai(monkeypatch)
+        bracket = make_listing(db_session, "24.99", days_old=0.1)
+        link(db_session, test_search, bracket)
+        monkeypatch.setattr(
+            digest,
+            "classify_listings",
+            lambda search, listings: {bracket.id: "accessory"},
+        )
+        classified = digest.classify_pending(db_session, test_user.id)
+        assert classified == 1
+        assert queries.get_relevance_map(db_session, test_search.id) == {
+            bracket.id: "accessory"
+        }
+
+    def test_classify_pending_fail_open(
+        self,
+        db_session: Session,
+        test_user: User,
+        test_search: Search,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        self._enable_ai(monkeypatch)
+        bracket = make_listing(db_session, "24.99", days_old=0.1)
+        link(db_session, test_search, bracket)
+        monkeypatch.setattr(digest, "classify_listings", lambda s, ls: None)
+        assert digest.classify_pending(db_session, test_user.id) == 0
+        assert queries.get_relevance_map(db_session, test_search.id) == {}
+
+    def test_classify_pending_disabled_no_calls(
+        self,
+        db_session: Session,
+        test_user: User,
+        test_search: Search,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # ai_filter_enabled stays False (module default via _digest_settings)
+        called = MagicMock()
+        monkeypatch.setattr(digest, "classify_listings", called)
+        assert digest.classify_pending(db_session, test_user.id) == 0
+        assert called.call_count == 0
