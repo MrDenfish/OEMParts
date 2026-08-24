@@ -9,6 +9,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user
+from app.config import settings
+from app.core.ai_relevance import craft_query
 from app.core.compatibility import resolve_fitment_category
 from app.core.price_stats import search_price_stats
 from app.core.search_runner import run_single_search
@@ -105,26 +107,35 @@ def create_search(
     # since that's the case where it most reliably trims aftermarket noise.
     default_oem_only = parsed_oem_number is not None
 
+    # AI query crafting (spec §4.5): refine the query text before category
+    # resolution so both benefit. Best-effort — any failure keeps the
+    # user's text verbatim.
+    final_query = query_text.strip()
+    if settings.ai_filter_enabled and settings.anthropic_api_key:
+        vehicle = queries.get_vehicle_by_id(db, vehicle_id, current_user.id)
+        if vehicle is not None:
+            crafted = craft_query(final_query, parsed_oem_number, vehicle, None)
+            if crafted:
+                final_query = crafted
+
     # Resolve an eBay fitment category from the query text. Inline eBay
     # call — sanctioned by the taxonomy exception in CLAUDE.md. Failure
     # must never block search creation; NULL just means fallback mode.
     category_id: str | None = None
     category_name: str | None = None
     try:
-        resolved = resolve_fitment_category(db, query_text.strip())
+        resolved = resolve_fitment_category(db, final_query)
         if resolved is not None:
             category_id = resolved.category_id
             category_name = resolved.category_name
     except Exception:
-        logger.exception(
-            "Category resolution errored for query '%s'", query_text.strip()
-        )
+        logger.exception("Category resolution errored for query '%s'", final_query)
 
     search = queries.create_search(
         db,
         user_id=current_user.id,
         vehicle_id=vehicle_id,
-        query_text=query_text.strip(),
+        query_text=final_query,
         oem_number=parsed_oem_number,
         max_price=parsed_price,
         condition_filter=parsed_condition,

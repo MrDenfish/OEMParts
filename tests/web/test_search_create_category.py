@@ -1,5 +1,7 @@
 """Search creation resolves and stores a fitment category (or None)."""
 
+from unittest.mock import MagicMock
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -145,3 +147,78 @@ def test_searches_page_shows_category_column(
     assert page.status_code == 200
     assert "Water Pumps" in page.text
     assert "<th>Category</th>" in page.text
+
+
+class TestAIQueryCrafting:
+    def test_crafted_query_stored_and_resolved(
+        self,
+        authed_client: TestClient,
+        db_session: Session,
+        test_vehicle: Vehicle,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(settings, "ai_filter_enabled", True)
+        monkeypatch.setattr(settings, "anthropic_api_key", "sk-test")
+        monkeypatch.setattr(
+            searches_module, "craft_query", lambda q, o, v, c: "water pump hose"
+        )
+        seen: dict = {}
+
+        def fake_resolve(db, query):
+            seen["query"] = query
+            return None
+
+        monkeypatch.setattr(searches_module, "resolve_fitment_category", fake_resolve)
+        authed_client.post(
+            "/searches/",
+            data={
+                "vehicle_id": str(test_vehicle.id),
+                "query_text": "Waterpump to Thermostat",
+            },
+            follow_redirects=False,
+        )
+        search = db_session.query(Search).filter_by(query_text="water pump hose").one()
+        assert search is not None
+        assert seen["query"] == "water pump hose"
+
+    def test_crafting_failure_keeps_user_text(
+        self,
+        authed_client: TestClient,
+        db_session: Session,
+        test_vehicle: Vehicle,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(settings, "ai_filter_enabled", True)
+        monkeypatch.setattr(settings, "anthropic_api_key", "sk-test")
+        monkeypatch.setattr(searches_module, "craft_query", lambda q, o, v, c: None)
+        monkeypatch.setattr(
+            searches_module, "resolve_fitment_category", lambda db, q: None
+        )
+        authed_client.post(
+            "/searches/",
+            data={"vehicle_id": str(test_vehicle.id), "query_text": "my exact words"},
+            follow_redirects=False,
+        )
+        assert (
+            db_session.query(Search).filter_by(query_text="my exact words").one()
+            is not None
+        )
+
+    def test_disabled_never_calls_craft(
+        self,
+        authed_client: TestClient,
+        db_session: Session,
+        test_vehicle: Vehicle,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        called = MagicMock()
+        monkeypatch.setattr(searches_module, "craft_query", called)
+        monkeypatch.setattr(
+            searches_module, "resolve_fitment_category", lambda db, q: None
+        )
+        authed_client.post(
+            "/searches/",
+            data={"vehicle_id": str(test_vehicle.id), "query_text": "plain"},
+            follow_redirects=False,
+        )
+        assert called.call_count == 0
