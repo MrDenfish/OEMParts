@@ -61,10 +61,16 @@ class Settings(BaseSettings):
     fetch_max_listings_per_query: int = 50
     fetch_api_rate_limit_per_min: int = 30
 
-    # Alerts (Phase 3)
+    # Alerts / Digest
     alerts_enabled: bool = False
     digest_price_drop_pct: int = 10
     deal_percentile: int = 25
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    digest_from: str = ""
+    digest_to: str = ""
 
     # Cleanup
     listing_inactive_after_missing_cycles: int = 3
