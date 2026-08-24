@@ -117,6 +117,11 @@ def classify_listings(
     except json.JSONDecodeError:
         logger.warning("AI classification returned non-JSON for search %s", search.id)
         return None
+    if not isinstance(data, dict):
+        logger.warning(
+            "AI classification returned non-object JSON for search %s", search.id
+        )
+        return None
 
     result: dict[uuid.UUID, str] = {}
     for entry in data.get("verdicts", []):
@@ -170,10 +175,19 @@ def craft_query(
 
     text = _first_text(response)
     if text is None:
+        logger.warning("AI query crafting refused/empty")
         return None
     try:
-        crafted = json.loads(text).get("query", "")
+        data = json.loads(text)
     except json.JSONDecodeError:
+        logger.warning("AI query crafting returned non-JSON")
+        return None
+    if not isinstance(data, dict):
+        logger.warning("AI query crafting returned non-object JSON")
+        return None
+    crafted = data.get("query", "")
+    if not isinstance(crafted, str):
+        logger.warning("AI query crafting returned non-string query")
         return None
     crafted = crafted.strip()
     if not crafted or len(crafted) > MAX_CRAFTED_QUERY_LEN:

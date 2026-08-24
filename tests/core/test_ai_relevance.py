@@ -144,6 +144,19 @@ class TestClassifyListings:
             is None
         )
 
+    def test_non_object_json_returns_none(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        response = SimpleNamespace(
+            stop_reason="end_turn",
+            content=[SimpleNamespace(type="text", text=json.dumps(["oops"]))],
+        )
+        patch_client(monkeypatch, response)
+        assert (
+            ai_relevance.classify_listings(make_search(), [make_listing("x", "1.00")])
+            is None
+        )
+
 
 class TestCraftQuery:
     def _vehicle(self) -> Vehicle:
@@ -170,4 +183,16 @@ class TestCraftQuery:
         patch_client(monkeypatch, fake_response({"query": "   "}))
         assert ai_relevance.craft_query("x", None, self._vehicle(), None) is None
         patch_client(monkeypatch, fake_response({"query": "y" * 500}))
+        assert ai_relevance.craft_query("x", None, self._vehicle(), None) is None
+
+    def test_refusal_returns_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        patch_client(monkeypatch, fake_response({}, stop_reason="refusal"))
+        assert ai_relevance.craft_query("x", None, self._vehicle(), None) is None
+
+    def test_malformed_json_returns_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        response = SimpleNamespace(
+            stop_reason="end_turn",
+            content=[SimpleNamespace(type="text", text="not json {")],
+        )
+        patch_client(monkeypatch, response)
         assert ai_relevance.craft_query("x", None, self._vehicle(), None) is None
