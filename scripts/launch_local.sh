@@ -28,6 +28,11 @@ URL="http://localhost:$PORT"
 mkdir -p "$LOG_DIR" "$RUN_DIR"
 cd "$PROJECT_DIR"
 
+# Finder-launched apps get a minimal PATH; locate the docker CLI (this
+# machine's Docker.app lives in a non-standard folder — see _docker_env.sh).
+# shellcheck source=/dev/null
+source "$PROJECT_DIR/scripts/_docker_env.sh"
+
 fail() {
     echo "ERROR: $1" >&2
     # Surface the error in a dialog when launched from the .app bundle
