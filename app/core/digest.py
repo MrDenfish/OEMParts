@@ -19,7 +19,7 @@ from email.message import EmailMessage
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.core.oem_filter import title_matches_oem
+from app.core.oem_filter import title_contains_part_number
 from app.core.price_stats import (
     is_low_in_search,
     recent_drop,
@@ -69,7 +69,7 @@ def scan_and_record(
                 assert isinstance(price, Decimal), "Listing.price must be Decimal"
                 notable = is_low_in_search(price, stats) or (
                     search.oem_number is not None
-                    and title_matches_oem(listing.title, search.oem_number)
+                    and title_contains_part_number(listing.title, search.oem_number)
                 )
                 if notable:
                     if not queries.recent_alert_exists(
@@ -86,7 +86,7 @@ def scan_and_record(
     return created, other_new
 
 
-def _fmt(price) -> str:
+def _fmt(price: Decimal) -> str:
     return f"${price:,.2f}"
 
 
@@ -115,6 +115,9 @@ def render_digest(
         search = db.get(Search, search_id)
         if search is None:
             continue
+        # Compute stats once per search for new_listing reason determination.
+        stats = search_price_stats(db, search_id)
+
         text_lines.append(f"\n== {search.query_text} ==")
         html_lines.append(f"<h3>{search.query_text}</h3><ul>")
         for alert in search_alerts[:DETAIL_CAP_PER_SEARCH]:
@@ -123,14 +126,35 @@ def render_digest(
                 continue
             if alert.alert_type == "price_drop":
                 drop = recent_drop(db, listing.id, lookback_days=7)
+                price = listing.price
+                assert isinstance(price, Decimal), "Listing.price must be Decimal"
                 detail = (
                     f"{_fmt(drop.old_price)} -> {_fmt(drop.new_price)} (-{drop.pct}%)"
                     if drop
-                    else _fmt(listing.price)
+                    else _fmt(price)
                 )
                 label = "PRICE DROP"
             else:
-                detail = f"{_fmt(listing.price)} — new, among the cheapest in this search or matches your OEM number"
+                # Determine the actual reason this new listing is notable.
+                price = listing.price
+                assert isinstance(price, Decimal), "Listing.price must be Decimal"
+                low = is_low_in_search(price, stats)
+                oem = search.oem_number is not None and title_contains_part_number(
+                    listing.title, search.oem_number
+                )
+
+                if low and oem:
+                    reason = (
+                        "among the cheapest in this search; matches your OEM number"
+                    )
+                elif low:
+                    reason = "among the cheapest in this search"
+                elif oem:
+                    reason = "matches your OEM number"
+                else:
+                    reason = "new"
+
+                detail = f"{_fmt(price)} — {reason}"
                 label = "NEW"
             text_lines.append(f"[{label}] {listing.title[:70]} — {detail}")
             text_lines.append(f"    {listing.item_url}")

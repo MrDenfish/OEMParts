@@ -127,6 +127,22 @@ class TestScanAndRecord:
         assert created == 0
         assert other[test_search.id] == 1
 
+    def test_genuine_without_number_counted_not_alerted(
+        self, db_session: Session, test_user: User, test_search: Search
+    ) -> None:
+        # "Genuine" word alone (no OEM number in title) should not trigger alert
+        # even though search has oem_number set.
+        seed_baseline(db_session, test_search)
+        genuine_no_number = make_listing(
+            db_session, "125.00", title="Genuine hose assembly", days_old=0.1
+        )
+        link(db_session, test_search, genuine_no_number)
+        created, other = digest.scan_and_record(
+            db_session, test_user.id, utcnow() - timedelta(days=1)
+        )
+        assert created == 0
+        assert other[test_search.id] == 1
+
     def test_dedup_no_second_alert(
         self, db_session: Session, test_user: User, test_search: Search
     ) -> None:
@@ -160,8 +176,50 @@ class TestRenderAndSend:
         assert "1 price drop" in subject
         assert "Coil pack" in text
         assert "48.00" in text and "77.71" in text
-        assert "cheapest in this search" not in text  # no low items in this fixture
+        assert "cheapest in this search" not in text  # no new items in this fixture
         assert "https://www.ebay.com/itm/1" in html
+
+    def test_render_new_listing_low_copy(
+        self, db_session: Session, test_user: User, test_search: Search
+    ) -> None:
+        # New listing that is low-priced should show "among the cheapest" copy.
+        seed_baseline(db_session, test_search)
+        cheap_new = make_listing(db_session, "50.00", title="Cheap part", days_old=0.1)
+        link(db_session, test_search, cheap_new)
+        digest.scan_and_record(db_session, test_user.id, utcnow() - timedelta(days=1))
+        alerts = queries.get_unnotified_alerts(db_session, test_user.id)
+        subject, text, html = digest.render_digest(db_session, alerts, {})
+        assert "among the cheapest in this search" in text
+        assert "matches your OEM number" not in text
+
+    def test_render_new_listing_oem_copy(
+        self, db_session: Session, test_user: User, test_search: Search
+    ) -> None:
+        # New listing that matches OEM number should show "matches your OEM" copy.
+        seed_baseline(db_session, test_search)
+        oem_new = make_listing(
+            db_session, "500.00", title="Hose LR010819 genuine", days_old=0.1
+        )
+        link(db_session, test_search, oem_new)
+        digest.scan_and_record(db_session, test_user.id, utcnow() - timedelta(days=1))
+        alerts = queries.get_unnotified_alerts(db_session, test_user.id)
+        subject, text, html = digest.render_digest(db_session, alerts, {})
+        assert "matches your OEM number" in text
+        assert "among the cheapest in this search" not in text
+
+    def test_render_new_listing_both_conditions(
+        self, db_session: Session, test_user: User, test_search: Search
+    ) -> None:
+        # New listing that is both low-priced AND matches OEM should show both.
+        seed_baseline(db_session, test_search)
+        cheap_oem = make_listing(
+            db_session, "50.00", title="Cheap LR010819 part", days_old=0.1
+        )
+        link(db_session, test_search, cheap_oem)
+        digest.scan_and_record(db_session, test_user.id, utcnow() - timedelta(days=1))
+        alerts = queries.get_unnotified_alerts(db_session, test_user.id)
+        subject, text, html = digest.render_digest(db_session, alerts, {})
+        assert "among the cheapest in this search; matches your OEM number" in text
 
     def test_run_digest_sends_and_stamps(
         self,

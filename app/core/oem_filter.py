@@ -23,6 +23,28 @@ def _normalize_part_number(value: str) -> str:
     return re.sub(r"[^a-z0-9]", "", value.lower())
 
 
+def title_contains_part_number(title: str, oem_number: str) -> bool:
+    """Return True if the listing title contains the normalized OEM part number.
+
+    The OEM number is matched as a normalized substring (case-insensitive,
+    hyphens/spaces stripped). Only checks for the part number itself, not
+    the words "OEM" or "Genuine".
+
+    Args:
+        title: Listing title from eBay.
+        oem_number: The OEM part number (must not be None or empty).
+
+    Returns:
+        True if the normalized part number appears in the normalized title.
+    """
+    normalized_number = _normalize_part_number(oem_number)
+    if len(normalized_number) >= 4:
+        normalized_title = _normalize_part_number(title)
+        if normalized_number in normalized_title:
+            return True
+    return False
+
+
 def title_matches_oem(title: str, oem_number: str | None) -> bool:
     """Return True if the listing title qualifies as OEM/Genuine.
 
@@ -43,11 +65,7 @@ def title_matches_oem(title: str, oem_number: str | None) -> bool:
     if _OEM_WORD_RE.search(title) or _GENUINE_WORD_RE.search(title):
         return True
 
-    if oem_number:
-        normalized_number = _normalize_part_number(oem_number)
-        if len(normalized_number) >= 4:
-            normalized_title = _normalize_part_number(title)
-            if normalized_number in normalized_title:
-                return True
+    if oem_number and title_contains_part_number(title, oem_number):
+        return True
 
     return False
