@@ -24,6 +24,13 @@
             <span title="No eBay fitment category — using vehicle keywords in the query">—</span>
         {% endif %}
     </td>
+    <td class="text-secondary">
+        {% if price_stats %}
+            <span title="Median of {{ price_stats.count }} active listings (min {{ price_stats.minimum|format_price }})">{{ price_stats.median|format_price }}</span>
+        {% else %}
+            —
+        {% endif %}
+    </td>
     <td>{{ search.max_price|format_price if search.max_price else '—' }}</td>
     <td>{{ search.condition_filter or 'Any' }}</td>
     <td>

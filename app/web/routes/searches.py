@@ -10,9 +10,10 @@ from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user
 from app.core.compatibility import resolve_fitment_category
+from app.core.price_stats import search_price_stats
 from app.core.search_runner import run_single_search
 from app.db import queries
-from app.db.models import User
+from app.db.models import Search, User
 from app.db.session import get_db
 
 # `templates` is intentionally NOT imported at module level here: app.web.main
@@ -26,6 +27,12 @@ from app.db.session import get_db
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _row_context(db: Session, search: Search) -> dict:
+    """Context for components/search_row.html — keeps HTMX row re-renders
+    consistent with the full-page render (median column)."""
+    return {"search": search, "price_stats": search_price_stats(db, search.id)}
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -55,6 +62,7 @@ def searches_page(
             "active_page": "searches",
             "vehicles": vehicles,
             "searches_by_vehicle": searches_by_vehicle,
+            "search_stats": {s.id: search_price_stats(db, s.id) for s in user_searches},
             "user": current_user,
         },
     )
@@ -144,7 +152,7 @@ def create_search(
         return templates.TemplateResponse(
             request,
             "components/search_row.html",
-            {"search": search},
+            _row_context(db, search),
         )
 
     return RedirectResponse(url="/searches", status_code=303)
@@ -170,7 +178,7 @@ def toggle_search(
         return templates.TemplateResponse(
             request,
             "components/search_row.html",
-            {"search": search},
+            _row_context(db, search),
         )
 
     return RedirectResponse(url="/searches", status_code=303)
@@ -196,7 +204,7 @@ def toggle_search_oem_only(
         return templates.TemplateResponse(
             request,
             "components/search_row.html",
-            {"search": search},
+            _row_context(db, search),
         )
 
     return RedirectResponse(url="/searches", status_code=303)
@@ -231,7 +239,7 @@ def fetch_search(
         return templates.TemplateResponse(
             request,
             "components/search_row.html",
-            {"search": search},
+            _row_context(db, search),
         )
 
     return RedirectResponse(url="/searches", status_code=303)

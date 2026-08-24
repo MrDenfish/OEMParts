@@ -2,12 +2,14 @@
 
 import uuid
 from decimal import Decimal, InvalidOperation
+from typing import cast
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user
+from app.core.price_stats import is_low_in_search, recent_drop, search_price_stats
 from app.db import queries
 from app.db.models import User
 from app.db.session import get_db
@@ -65,6 +67,30 @@ def listings_page(
     vehicles = queries.get_vehicles_for_user(db, current_user.id)
     user_searches = queries.get_searches_for_user(db, current_user.id)
 
+    # Deal badges (spec §4.2): drop = listing vs its own 7-day history;
+    # low = cheapest quartile of the filtered search (only meaningful when
+    # a single search is selected).
+    #
+    # Multi-tenancy contract (CLAUDE.md): search_id is a raw query param, so
+    # confirm the search belongs to current_user before computing stats from
+    # it — otherwise a user could probe another user's search by id and infer
+    # its price distribution via the "low" badge.
+    stats = None
+    if search_id is not None:
+        owned_search = queries.get_search_by_id(db, search_id, current_user.id)
+        if owned_search is not None:
+            stats = search_price_stats(db, search_id)
+    # cast: Listing.price is a Numeric(10, 2) column, always a Decimal at
+    # runtime, but the model's `Mapped[None]` annotation (pre-existing typo,
+    # out of scope here — see app/db/models.py) makes mypy infer None.
+    listing_extras = {
+        listing.id: {
+            "drop": recent_drop(db, listing.id, lookback_days=7),
+            "low": is_low_in_search(cast(Decimal, listing.price), stats),
+        }
+        for listing in listing_list
+    }
+
     template_name = "pages/listings.html"
 
     # HTMX request: return just the table body
@@ -77,6 +103,7 @@ def listings_page(
         {
             "active_page": "listings",
             "listings": listing_list,
+            "listing_extras": listing_extras,
             "vehicles": vehicles,
             "searches": user_searches,
             "user": current_user,

@@ -14,6 +14,13 @@
             {% if not listing.is_active %}
                 <span class="badge badge-inactive">Ended</span>
             {% endif %}
+            {% set extras = listing_extras.get(listing.id) if listing_extras else None %}
+            {% if extras and extras.drop %}
+                <span class="badge badge-active" title="Was {{ extras.drop.old_price|format_price }} within the last 7 days">▼ {{ extras.drop.pct }}%</span>
+            {% endif %}
+            {% if extras and extras.low %}
+                <span class="badge" title="Among the cheapest in this search">low</span>
+            {% endif %}
         </div>
     </td>
     <td class="listing-price">{{ listing.price|format_price }}</td>
