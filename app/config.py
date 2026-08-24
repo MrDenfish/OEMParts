@@ -72,6 +72,11 @@ class Settings(BaseSettings):
     digest_from: str = ""
     digest_to: str = ""
 
+    # AI relevance filter (spec docs/superpowers/specs/2026-08-24-ai-*.md)
+    ai_filter_enabled: bool = False
+    anthropic_api_key: str = ""
+    ai_model: str = "claude-opus-5"
+
     # Cleanup
     listing_inactive_after_missing_cycles: int = 3
     listing_archive_after_days: int = 180

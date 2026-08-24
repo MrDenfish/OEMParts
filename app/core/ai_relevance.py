@@ -1,0 +1,181 @@
+"""AI relevance classification and query crafting (fail-open).
+
+Two touchpoints (spec §4.2): classify_listings — one call per search
+batching listing titles into part/accessory/unrelated verdicts via
+structured outputs — and craft_query, a one-shot query refinement at
+search creation. Every failure path returns None; callers treat None
+as "behave exactly as before". The API key is never logged.
+"""
+
+import json
+import logging
+import uuid
+
+import anthropic
+
+from app.config import settings
+from app.db.models import Listing, Search, Vehicle
+
+logger = logging.getLogger(__name__)
+
+VERDICTS = ("part", "accessory", "unrelated")
+MAX_CRAFTED_QUERY_LEN = 200
+
+CLASSIFY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "verdicts": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "index": {"type": "integer"},
+                    "verdict": {"type": "string", "enum": list(VERDICTS)},
+                },
+                "required": ["index", "verdict"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["verdicts"],
+    "additionalProperties": False,
+}
+
+CRAFT_SCHEMA = {
+    "type": "object",
+    "properties": {"query": {"type": "string"}},
+    "required": ["query"],
+    "additionalProperties": False,
+}
+
+
+def _client() -> anthropic.Anthropic:
+    """Client factory — the single construction point and the test seam."""
+    return anthropic.Anthropic(api_key=settings.anthropic_api_key)
+
+
+def _first_text(response: object) -> str | None:
+    """Extract the first text block, or None (refusal / empty content)."""
+    if getattr(response, "stop_reason", None) == "refusal":
+        return None
+    for block in getattr(response, "content", []):
+        if getattr(block, "type", None) == "text":
+            return block.text
+    return None
+
+
+def classify_listings(
+    search: Search, listings: list[Listing]
+) -> dict[uuid.UUID, str] | None:
+    """Classify listings for one search. None on failure; {} for no input."""
+    if not listings:
+        return {}
+
+    lines = "\n".join(
+        f"{i}. {listing.title} (${listing.price})" for i, listing in enumerate(listings)
+    )
+    intent = (
+        f"Search query: {search.query_text}\n"
+        f"OEM part number: {search.oem_number or 'none'}\n"
+        f"eBay category: {search.category_name or 'unknown'}\n"
+    )
+    prompt = (
+        "You are classifying eBay listings for a car-parts tracking tool.\n"
+        "The user's search describes ONE specific part they want to buy.\n\n"
+        f"{intent}\n"
+        "For each numbered listing below, decide:\n"
+        "- part: this listing IS the part itself (any brand, incl. "
+        "aftermarket equivalents and supersession part numbers)\n"
+        "- accessory: a bracket, mount, relay, pipe, seal, tool, or other "
+        "item FOR the part, not the part itself\n"
+        "- unrelated: neither the part nor an accessory for it\n\n"
+        f"Listings:\n{lines}"
+    )
+
+    try:
+        response = _client().messages.create(
+            model=settings.ai_model,
+            # Thinking is on by default on current models and shares this
+            # budget with the JSON output — leave headroom for both.
+            max_tokens=8192,
+            output_config={
+                "effort": "low",
+                "format": {"type": "json_schema", "schema": CLASSIFY_SCHEMA},
+            },
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except anthropic.APIError as exc:
+        logger.warning("AI classification failed for search %s: %s", search.id, exc)
+        return None
+
+    text = _first_text(response)
+    if text is None:
+        logger.warning("AI classification refused/empty for search %s", search.id)
+        return None
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        logger.warning("AI classification returned non-JSON for search %s", search.id)
+        return None
+
+    result: dict[uuid.UUID, str] = {}
+    for entry in data.get("verdicts", []):
+        index = entry.get("index")
+        verdict = entry.get("verdict")
+        if (
+            isinstance(index, int)
+            and 0 <= index < len(listings)
+            and verdict in VERDICTS
+        ):
+            result[listings[index].id] = verdict
+    return result
+
+
+def craft_query(
+    query_text: str,
+    oem_number: str | None,
+    vehicle: Vehicle,
+    category_name: str | None,
+) -> str | None:
+    """Refine a search query for eBay matching. None on any failure."""
+    prompt = (
+        "Rewrite this eBay search query for a car-parts tracker. Rules:\n"
+        "- keep or add the part's common noun (e.g. 'hose', 'compressor')\n"
+        "- keep brand/manufacturer words if implied by the part number\n"
+        "- drop connector words like 'to', 'and', 'for' (eBay ANDs all "
+        "words, so extra words over-narrow results)\n"
+        "- do NOT include the vehicle year/make/model (fitment filtering "
+        "handles that)\n"
+        "- do NOT invent part numbers; do NOT include the part number in "
+        "the query\n"
+        "- return 2-5 words\n\n"
+        f"Vehicle: {vehicle.year} {vehicle.make} {vehicle.model}\n"
+        f"OEM part number: {oem_number or 'none'}\n"
+        f"eBay category: {category_name or 'unknown'}\n"
+        f"User's query: {query_text}"
+    )
+    try:
+        response = _client().messages.create(
+            model=settings.ai_model,
+            max_tokens=1024,
+            output_config={
+                "effort": "low",
+                "format": {"type": "json_schema", "schema": CRAFT_SCHEMA},
+            },
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except anthropic.APIError as exc:
+        logger.warning("AI query crafting failed: %s", exc)
+        return None
+
+    text = _first_text(response)
+    if text is None:
+        return None
+    try:
+        crafted = json.loads(text).get("query", "")
+    except json.JSONDecodeError:
+        return None
+    crafted = crafted.strip()
+    if not crafted or len(crafted) > MAX_CRAFTED_QUERY_LEN:
+        return None
+    return crafted
