@@ -11,6 +11,7 @@
 #   intraday       09:00, 14:00, 20:00    high-priority searches only
 #   cleanup        03:30 daily            expire/archive old listings
 #   taxonomy-sync  Sunday 04:00           re-resolve missing categories
+#   digest         07:00 daily            scan for deals and email summary
 #
 # launchd (unlike cron) coalesces a missed StartCalendarInterval: if the Mac
 # is asleep at the scheduled time, the job fires once on wake. If the Mac is
@@ -72,6 +73,9 @@ write_plist "$PREFIX.cleanup" "cleanup" \
 
 write_plist "$PREFIX.taxonomy-sync" "taxonomy-sync" \
     '<dict><key>Weekday</key><integer>0</integer><key>Hour</key><integer>4</integer><key>Minute</key><integer>0</integer></dict>'
+
+write_plist "$PREFIX.digest" "digest" \
+    '<dict><key>Hour</key><integer>7</integer><key>Minute</key><integer>0</integer></dict>'
 
 echo ""
 echo "Done. Jobs run on schedule while the Mac is awake (missed runs fire on wake)."

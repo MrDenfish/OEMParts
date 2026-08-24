@@ -63,6 +63,7 @@
                 <th>OEM #</th>
                 <th>OEM-only</th>
                 <th>Category</th>
+                <th>Median $</th>
                 <th>Max Price</th>
                 <th>Condition</th>
                 <th>Status</th>
@@ -73,6 +74,7 @@
         <tbody id="search-list">
             {% for vehicle in vehicles %}
                 {% for search in searches_by_vehicle.get(vehicle.id, []) %}
+                    {% set price_stats = search_stats.get(search.id) %}
                     {% include "components/search_row.html" %}
                 {% endfor %}
             {% endfor %}

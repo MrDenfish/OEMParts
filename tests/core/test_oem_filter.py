@@ -1,6 +1,6 @@
 """Tests for the OEM-only title filter."""
 
-from app.core.oem_filter import title_matches_oem
+from app.core.oem_filter import title_contains_part_number, title_matches_oem
 
 
 def test_oem_word_in_title_matches() -> None:
@@ -69,3 +69,39 @@ def test_short_oem_number_skipped() -> None:
 def test_oem_number_none_falls_back_to_word_match() -> None:
     assert title_matches_oem("OEM Coolant Pipe", None) is True
     assert title_matches_oem("Aftermarket Coolant Pipe", None) is False
+
+
+# Tests for title_contains_part_number (for digest alerting, not filtering).
+class TestTitleContainsPartNumber:
+    def test_matches_normalized_number_in_title(self) -> None:
+        assert title_contains_part_number("Coolant Pipe LR036970", "LR036970") is True
+
+    def test_matches_hyphenated_number_in_title(self) -> None:
+        assert title_contains_part_number("Pipe LR-036970 Fits LR4", "LR036970") is True
+
+    def test_matches_spaced_number_in_title(self) -> None:
+        assert title_contains_part_number("Pipe LR 036970 Fits LR4", "LR036970") is True
+
+    def test_does_not_match_genuine_without_number(self) -> None:
+        assert title_contains_part_number("Genuine hose assembly", "LR036970") is False
+
+    def test_does_not_match_oem_word_without_number(self) -> None:
+        assert title_contains_part_number("OEM hose assembly", "LR036970") is False
+
+    def test_stored_number_with_hyphens_normalizes(self) -> None:
+        assert (
+            title_contains_part_number("Coolant Pipe LR036970 Fits LR4", "LR-036970")
+            is True
+        )
+
+    def test_short_number_skipped(self) -> None:
+        assert title_contains_part_number("Pipe abc Fits LR4", "abc") is False
+
+    def test_number_in_other_word_substring_matches(self) -> None:
+        # Unlike title_matches_oem, this function does substring matching
+        # on the normalized number, so "LR036970" in "SomeLR036970Thing" would match.
+        # This is intentional — sellers sometimes concatenate without spaces.
+        assert (
+            title_contains_part_number("Pipe SomeLR036970Thing Fits", "LR036970")
+            is True
+        )

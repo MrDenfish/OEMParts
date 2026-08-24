@@ -2,7 +2,7 @@
 #
 # OEMParts — scheduled job runner, invoked by launchd.
 #
-#   scheduled_job.sh nightly|intraday|cleanup|taxonomy-sync
+#   scheduled_job.sh nightly|intraday|cleanup|taxonomy-sync|digest
 #
 # Installed by scripts/install_schedules.sh (see the plists it writes to
 # ~/Library/LaunchAgents). Each run ensures Docker Desktop and the Postgres
@@ -27,8 +27,8 @@ exec >> "$PROJECT_DIR/logs/scheduled.log" 2>&1
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') [scheduled:$JOB] $1"; }
 
 case "$JOB" in
-    nightly|intraday|cleanup|taxonomy-sync) ;;
-    *) log "ERROR: unknown job '${JOB}' (expected nightly|intraday|cleanup|taxonomy-sync)"; exit 64 ;;
+    nightly|intraday|cleanup|taxonomy-sync|digest) ;;
+    *) log "ERROR: unknown job '${JOB}' (expected nightly|intraday|cleanup|taxonomy-sync|digest)"; exit 64 ;;
 esac
 
 log "starting"
@@ -62,6 +62,7 @@ case "$JOB" in
     intraday)      "$VENV/bin/python" oemparts fetch --cycle=intraday ;;
     cleanup)       "$VENV/bin/python" oemparts cleanup ;;
     taxonomy-sync) "$VENV/bin/python" oemparts taxonomy-sync ;;
+    digest)        "$VENV/bin/python" oemparts digest ;;
 esac
 
 log "done"

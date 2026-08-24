@@ -15,6 +15,7 @@ from sqlalchemy import delete, update
 from sqlalchemy.orm import Session
 
 from app.db.models import (
+    Alert,
     FetchRun,
     Listing,
     PriceHistory,
@@ -507,3 +508,71 @@ def archive_old_listings(db: Session, older_than_days: int) -> int:
     )
     db.flush()
     return result.rowcount  # type: ignore[return-value]
+
+
+# ---------------------------------------------------------------------------
+# Alert queries (digest — spec docs/superpowers/specs/2026-08-24-*.md §4.3)
+# ---------------------------------------------------------------------------
+
+
+def create_alert(
+    db: Session,
+    user_id: uuid.UUID,
+    search_id: uuid.UUID,
+    listing_id: uuid.UUID,
+    alert_type: str,
+    channel: str = "email",
+) -> Alert:
+    """Record a digest alert. notified_at stays NULL until the email sends."""
+    alert = Alert(
+        user_id=user_id,
+        search_id=search_id,
+        listing_id=listing_id,
+        alert_type=alert_type,
+        channel=channel,
+    )
+    db.add(alert)
+    db.flush()
+    return alert
+
+
+def recent_alert_exists(
+    db: Session,
+    search_id: uuid.UUID,
+    listing_id: uuid.UUID,
+    alert_type: str,
+    within_days: int = 7,
+) -> bool:
+    """Dedup check: same (search, listing, type) alerted within the window."""
+    cutoff = utcnow() - timedelta(days=within_days)
+    return (
+        db.query(Alert.id)
+        .filter(
+            Alert.search_id == search_id,
+            Alert.listing_id == listing_id,
+            Alert.alert_type == alert_type,
+            Alert.triggered_at >= cutoff,
+        )
+        .first()
+        is not None
+    )
+
+
+def get_unnotified_alerts(db: Session, user_id: uuid.UUID) -> list[Alert]:
+    """All of a user's alerts that have not been emailed yet."""
+    return (
+        db.query(Alert)
+        .filter(Alert.user_id == user_id, Alert.notified_at.is_(None))
+        .order_by(Alert.triggered_at)
+        .all()
+    )
+
+
+def mark_alerts_notified(db: Session, alert_ids: list[uuid.UUID]) -> None:
+    """Stamp notified_at after a successful email send."""
+    if not alert_ids:
+        return
+    db.execute(
+        update(Alert).where(Alert.id.in_(alert_ids)).values(notified_at=utcnow())
+    )
+    db.flush()

@@ -1,7 +1,7 @@
 """CLI entry point for OEMParts worker commands.
 
 Uses argparse (stdlib) with subparsers for each command.
-Commands: fetch, cleanup, health, taxonomy-sync.
+Commands: fetch, cleanup, health, taxonomy-sync, digest.
 """
 
 import argparse
@@ -84,6 +84,20 @@ def cmd_taxonomy_sync(args: argparse.Namespace) -> None:
         print(f"{len(results)} searches processed")
 
 
+def cmd_digest(args: argparse.Namespace) -> None:
+    """Run the morning digest: scan for deals and email the summary."""
+    setup_logging()
+    from app.core.digest import run_digest
+
+    with get_session() as db:
+        summary = run_digest(db)
+        # print() is acceptable here — CLI user-facing output (per CLAUDE.md)
+        print(f"alerts created: {summary.alerts_created}")
+        print(f"emails sent:    {summary.emails_sent}")
+        if summary.skipped_reason:
+            print(f"note: sending skipped ({summary.skipped_reason})")
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the CLI argument parser."""
     parser = argparse.ArgumentParser(
@@ -129,6 +143,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Re-resolve every active search, not just those missing a category",
     )
     taxonomy_parser.set_defaults(func=cmd_taxonomy_sync)
+
+    # digest
+    digest_parser = subparsers.add_parser(
+        "digest", help="Scan for deals and email the morning digest"
+    )
+    digest_parser.set_defaults(func=cmd_digest)
 
     return parser
 
