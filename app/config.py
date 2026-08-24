@@ -63,6 +63,8 @@ class Settings(BaseSettings):
 
     # Alerts (Phase 3)
     alerts_enabled: bool = False
+    digest_price_drop_pct: int = 10
+    deal_percentile: int = 25
 
     # Cleanup
     listing_inactive_after_missing_cycles: int = 3
