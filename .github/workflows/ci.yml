@@ -49,7 +49,13 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
+          # Pin ruff to the version used in the local .venv — requirements.txt
+          # allows >=0.4,<1.0, and a newer ruff in CI enforces rules the
+          # codebase was never linted against (61 spurious findings on the
+          # first run). Bump this pin together with the local venv.
+          pip install "ruff==0.15.11"
 
       - name: Lint (ruff)
         run: |
