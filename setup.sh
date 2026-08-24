@@ -104,7 +104,14 @@ LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchS
 [ -x "$LSREGISTER" ] && "$LSREGISTER" -f "$APP" || true
 touch "$APP"
 
-ln -sfn "$APP" "$HOME/Desktop/$APP_NAME"
+# macOS privacy controls can deny Desktop writes to terminal processes
+# ("Operation not permitted"). An existing shortcut keeps working, so warn
+# instead of aborting the whole setup.
+if ! ln -sfn "$APP" "$HOME/Desktop/$APP_NAME" 2>/dev/null; then
+    echo "==> (couldn't update the Desktop shortcut — an existing one still works;"
+    echo "     otherwise grant your terminal Desktop access in System Settings"
+    echo "     > Privacy & Security > Files and Folders, then re-run)"
+fi
 
 echo ""
 echo "Done. Launch it by:"
