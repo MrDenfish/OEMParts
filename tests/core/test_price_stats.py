@@ -4,10 +4,13 @@ import uuid
 from datetime import timedelta
 from decimal import Decimal
 
+import pytest
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.core.price_stats import (
     MIN_LISTINGS_FOR_STATS,
+    _nearest_rank,
     is_low_in_search,
     recent_drop,
     search_price_stats,
@@ -84,6 +87,15 @@ class TestRecentDrop:
         snapshot(db_session, listing, "100.00", days_ago=0.1)
         assert recent_drop(db_session, listing.id, lookback_days=7) is None
 
+    def test_unrounded_drop_below_threshold_is_none(self, db_session: Session) -> None:
+        # 9.6% raw drop would quantize (ROUND_HALF_UP) to 10% and incorrectly
+        # pass a 10% threshold if compared post-rounding. Must compare raw.
+        assert settings.digest_price_drop_pct == 10
+        listing = make_listing(db_session, "90.40")
+        snapshot(db_session, listing, "100.00", days_ago=1)
+        snapshot(db_session, listing, "90.40", days_ago=0.1)
+        assert recent_drop(db_session, listing.id, lookback_days=7) is None
+
 
 class TestSearchPriceStats:
     def test_stats_computed(self, db_session: Session, test_search: Search) -> None:
@@ -120,6 +132,18 @@ class TestSearchPriceStats:
         assert stats is not None
         assert stats.count == 5
         assert stats.minimum == Decimal("25.00")
+
+
+class TestNearestRank:
+    def test_integer_math_matches_percentile_20_of_5(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # percentile=20, n=5 -> ceil(20*5/100) - 1 = ceil(1.0) - 1 = 0 ->
+        # the 1st (cheapest) element, exercising the integer ceil-division
+        # boundary (exact multiple of 100) rather than the usual 25% case.
+        monkeypatch.setattr(settings, "deal_percentile", 20)
+        prices = [Decimal(p) for p in ["25.00", "30.00", "100.00", "200.00", "1000.00"]]
+        assert _nearest_rank(prices, settings.deal_percentile) == Decimal("25.00")
 
 
 class TestIsLowInSearch:

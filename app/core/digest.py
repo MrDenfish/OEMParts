@@ -1,13 +1,14 @@
 """Morning digest: scan for deals, record alerts, email the owner.
 
-Flow (spec §4.3-4.4): scan_and_record finds price drops (24h window) and
-notable new listings per active search and writes deduped Alert rows with
-notified_at NULL. run_digest then emails ALL of a user's unnotified alerts
-(so a failed send retries next run) and stamps notified_at on success.
-Plain new arrivals are counted in the email but never alerted — noise
-control. No email when there is nothing to say.
+Flow (spec §4.3-4.4): scan_and_record finds price drops (2-day scan window)
+and notable new listings per active search and writes deduped Alert rows
+with notified_at NULL. run_digest then emails ALL of a user's unnotified
+alerts (so a failed send retries next run) and stamps notified_at on
+success. Plain new arrivals are counted in the email but never alerted —
+noise control. No email when there is nothing to say.
 """
 
+import html
 import logging
 import smtplib
 import uuid
@@ -33,6 +34,16 @@ logger = logging.getLogger(__name__)
 DETAIL_CAP_PER_SEARCH = 5
 ALERT_DEDUP_DAYS = 7
 
+# Snapshots are recorded once per fetch, not continuously. The nightly fetch
+# runs at 03:00 and the digest at 07:00, but a Mac asleep at 3 fetches on
+# wake — and even on schedule, "yesterday's fetch" can be recorded up to
+# ~28 hours before "today's digest run" (03:00 -> 07:00 next day). A 1-day
+# (24h) scan window would miss that snapshot entirely, so recent_drop would
+# never see the 2 rows it needs to compare. 2 days comfortably covers the
+# real cadence; the 7-day alert dedup (ALERT_DEDUP_DAYS) still guarantees a
+# given drop is only ever announced once.
+SCAN_LOOKBACK_DAYS = 2
+
 
 @dataclass
 class DigestSummary:
@@ -56,7 +67,7 @@ def scan_and_record(
 
         for listing in listings:
             # Signal 1: price drop within the digest window (own history).
-            drop = recent_drop(db, listing.id, lookback_days=1)
+            drop = recent_drop(db, listing.id, lookback_days=SCAN_LOOKBACK_DAYS)
             if drop is not None and not queries.recent_alert_exists(
                 db, search.id, listing.id, "price_drop", ALERT_DEDUP_DAYS
             ):
@@ -119,7 +130,7 @@ def render_digest(
         stats = search_price_stats(db, search_id)
 
         text_lines.append(f"\n== {search.query_text} ==")
-        html_lines.append(f"<h3>{search.query_text}</h3><ul>")
+        html_lines.append(f"<h3>{html.escape(search.query_text)}</h3><ul>")
         for alert in search_alerts[:DETAIL_CAP_PER_SEARCH]:
             listing = db.get(Listing, alert.listing_id)
             if listing is None:
@@ -158,9 +169,12 @@ def render_digest(
                 label = "NEW"
             text_lines.append(f"[{label}] {listing.title[:70]} — {detail}")
             text_lines.append(f"    {listing.item_url}")
+            safe_title = html.escape(listing.title[:70])
+            safe_url = html.escape(listing.item_url, quote=True)
+            safe_detail = html.escape(detail)
             html_lines.append(
-                f'<li><b>{label}</b>: <a href="{listing.item_url}">'
-                f"{listing.title[:70]}</a> — {detail}</li>"
+                f'<li><b>{label}</b>: <a href="{safe_url}">'
+                f"{safe_title}</a> — {safe_detail}</li>"
             )
         hidden = len(search_alerts) - DETAIL_CAP_PER_SEARCH
         if hidden > 0:
@@ -209,13 +223,15 @@ def run_digest(db: Session) -> DigestSummary:
     total_created = 0
     emails_sent = 0
 
+    if not settings.alerts_enabled:
+        return DigestSummary(
+            alerts_created=0, emails_sent=0, skipped_reason="alerts_disabled"
+        )
+
     users = db.query(User).all()
     for user in users:
         created, other_new = scan_and_record(db, user.id, window_start)
         total_created += created
-
-        if not settings.alerts_enabled:
-            continue
 
         pending = queries.get_unnotified_alerts(db, user.id)
         if not pending:
@@ -233,9 +249,8 @@ def run_digest(db: Session) -> DigestSummary:
                 len(pending),
             )
 
-    skipped = "alerts_disabled" if not settings.alerts_enabled else None
     return DigestSummary(
         alerts_created=total_created,
         emails_sent=emails_sent,
-        skipped_reason=skipped,
+        skipped_reason=None,
     )

@@ -143,6 +143,30 @@ class TestScanAndRecord:
         assert created == 0
         assert other[test_search.id] == 1
 
+    def test_drop_visible_across_real_fetch_cadence(
+        self, db_session: Session, test_user: User, test_search: Search
+    ) -> None:
+        """Regression: nightly fetch 03:00, digest 07:00 -> ~28h gap.
+
+        A lookback_days=1 (24h) scan window would miss yesterday's snapshot
+        entirely (it's ~28h old), leaving recent_drop with only 1 row in
+        the window and no drop detected. SCAN_LOOKBACK_DAYS=2 must span it.
+        """
+        seed_baseline(db_session, test_search)
+        dropped = make_listing(db_session, "48.00", days_old=10)
+        link(db_session, test_search, dropped)
+        # ~28h ago (yesterday's 03:00 fetch) and ~2.4h ago (today's digest run).
+        snapshot(db_session, dropped, "77.71", days_ago=1.2)
+        snapshot(db_session, dropped, "48.00", days_ago=0.1)
+
+        created, _ = digest.scan_and_record(
+            db_session, test_user.id, utcnow() - timedelta(days=1)
+        )
+        assert created == 1
+        alerts = queries.get_unnotified_alerts(db_session, test_user.id)
+        assert alerts[0].alert_type == "price_drop"
+        assert alerts[0].listing_id == dropped.id
+
     def test_dedup_no_second_alert(
         self, db_session: Session, test_user: User, test_search: Search
     ) -> None:
@@ -221,6 +245,24 @@ class TestRenderAndSend:
         subject, text, html = digest.render_digest(db_session, alerts, {})
         assert "among the cheapest in this search; matches your OEM number" in text
 
+    def test_render_escapes_html(
+        self, db_session: Session, test_user: User, test_search: Search
+    ) -> None:
+        seed_baseline(db_session, test_search)
+        nasty = make_listing(
+            db_session, "50.00", title='<b>A&B "hose"</b>', days_old=0.1
+        )
+        link(db_session, test_search, nasty)
+        digest.scan_and_record(db_session, test_user.id, utcnow() - timedelta(days=1))
+        alerts = queries.get_unnotified_alerts(db_session, test_user.id)
+        subject, text, html_part = digest.render_digest(db_session, alerts, {})
+        assert "&lt;b&gt;" in html_part
+        assert "&amp;B" in html_part
+        assert "&quot;hose&quot;" in html_part
+        assert "<b>A&B" not in html_part
+        # Plain-text branch is unaffected — the raw title should appear as-is.
+        assert '<b>A&B "hose"</b>' in text
+
     def test_run_digest_sends_and_stamps(
         self,
         db_session: Session,
@@ -266,12 +308,22 @@ class TestRenderAndSend:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setattr(settings, "alerts_enabled", False)
-        self._pending(db_session, test_user, test_search)
+        # Seed data that WOULD produce a price-drop alert if scanned, to
+        # prove disabled mode never calls scan_and_record (spec: disabled
+        # mode computes/prints only, it does not record).
+        seed_baseline(db_session, test_search)
+        dropped = make_listing(db_session, "48.00", title="Coil pack", days_old=10)
+        link(db_session, test_search, dropped)
+        snapshot(db_session, dropped, "77.71", days_ago=0.9)
+        snapshot(db_session, dropped, "48.00", days_ago=0.05)
+
         sent = MagicMock(return_value=True)
         monkeypatch.setattr(digest, "send_email", sent)
         summary = digest.run_digest(db_session)
         assert summary.skipped_reason == "alerts_disabled"
+        assert summary.alerts_created == 0
         assert sent.call_count == 0
+        assert queries.get_unnotified_alerts(db_session, test_user.id) == []
 
 
 class TestSendEmail:

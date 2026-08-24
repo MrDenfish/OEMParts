@@ -91,9 +91,14 @@ listing only against *itself*, so it is immune to the mixed-parts problem
 below. Function:
 `recent_drop(db, listing_id, lookback_days) -> PriceDrop | None` where
 `PriceDrop = (old_price, new_price, pct)` — the dashboard badge uses
-`lookback_days=7`; the digest uses `lookback_days=1` (its 24h window), so a
-drop is announced once when it happens, not re-announced all week (the 7-day
-alert dedup backstops this).
+`lookback_days=7`; the digest scan uses `lookback_days=2`
+(`SCAN_LOOKBACK_DAYS` in `app/core/digest.py`). Snapshots are recorded once
+per fetch, not continuously, and the nightly fetch (03:00) precedes the
+digest (07:00) by design — so "yesterday's" snapshot can be up to ~28 hours
+old by the time the digest scans, which a 24-hour window would miss
+entirely. The 2-day window comfortably spans that gap; a drop is still
+announced once, not re-announced all week, because the 7-day alert dedup
+backstops it regardless of scan window width.
 
 **Low-in-search (advisory).** A listing whose price is at or below the
 **25th percentile** (`DEAL_PERCENTILE`, configurable) of its search's active

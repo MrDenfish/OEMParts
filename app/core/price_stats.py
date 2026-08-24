@@ -9,7 +9,6 @@ Two deliberately narrow signals (spec §4.1):
     "among the cheapest in this search", never "below market value".
 """
 
-import math
 import uuid
 from dataclasses import dataclass
 from datetime import timedelta
@@ -67,15 +66,24 @@ def recent_drop(
     if peak <= 0 or current >= peak:
         return None
 
-    pct = ((peak - current) / peak * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
-    if pct < settings.digest_price_drop_pct:
+    # Compare the raw (unrounded) ratio against the threshold first — rounding
+    # before comparing would let e.g. a 9.5% drop round up to 10% and pass a
+    # 10% bar it didn't actually clear. Only the *displayed* pct is quantized.
+    raw_pct = (peak - current) / peak * 100
+    if raw_pct < settings.digest_price_drop_pct:
         return None
+    pct = raw_pct.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
     return PriceDrop(old_price=peak, new_price=current, pct=pct)
 
 
 def _nearest_rank(sorted_prices: list[Decimal], percentile: int) -> Decimal:
-    """Nearest-rank percentile: value at index ceil(P/100 * n) - 1."""
-    index = math.ceil(percentile / 100 * len(sorted_prices)) - 1
+    """Nearest-rank percentile: value at index ceil(P/100 * n) - 1.
+
+    Exact integer arithmetic (ceil division via negated floor division)
+    instead of float math — avoids float/percentile edge cases entirely.
+    """
+    n = len(sorted_prices)
+    index = -(-percentile * n // 100) - 1
     return sorted_prices[max(index, 0)]
 
 
