@@ -21,6 +21,11 @@
             {% if extras and extras.low %}
                 <span class="badge" title="Among the cheapest in this search">low</span>
             {% endif %}
+            {% if extras and extras.relevance == 'accessory' %}
+                <span class="badge badge-inactive" title="Classified as an accessory for this search">acc</span>
+            {% elif extras and extras.relevance == 'unrelated' %}
+                <span class="badge badge-inactive" title="Classified as unrelated to this search">off</span>
+            {% endif %}
         </div>
     </td>
     <td class="listing-price">{{ listing.price|format_price }}</td>

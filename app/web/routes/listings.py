@@ -76,10 +76,17 @@ def listings_page(
     # it — otherwise a user could probe another user's search by id and infer
     # its price distribution via the "low" badge.
     stats = None
+    owned_search = None
     if search_id is not None:
         owned_search = queries.get_search_by_id(db, search_id, current_user.id)
         if owned_search is not None:
             stats = search_price_stats(db, search_id)
+
+    # AI relevance tags (Task 5): fetch the relevance map for the owned search
+    relevance_map = (
+        queries.get_relevance_map(db, owned_search.id) if owned_search else {}
+    )
+
     # cast: Listing.price is a Numeric(10, 2) column, always a Decimal at
     # runtime, but the model's `Mapped[None]` annotation (pre-existing typo,
     # out of scope here — see app/db/models.py) makes mypy infer None.
@@ -87,6 +94,7 @@ def listings_page(
         listing.id: {
             "drop": recent_drop(db, listing.id, lookback_days=7),
             "low": is_low_in_search(cast(Decimal, listing.price), stats),
+            "relevance": relevance_map.get(listing.id),
         }
         for listing in listing_list
     }
