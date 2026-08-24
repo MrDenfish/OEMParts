@@ -1,0 +1,72 @@
+# Continuous integration: lint, migrations, and the full test suite.
+#
+# Runs on every pull request and every push to main. The test suite needs a
+# real Postgres with a dedicated oemparts_test database (tests/conftest.py
+# refuses to touch the main DB by design), so a postgres:15 service container
+# mirrors the local docker-compose setup. No eBay credentials are needed —
+# tests never call external APIs.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      db:
+        image: postgres:15
+        env:
+          POSTGRES_DB: oemparts
+          POSTGRES_USER: oemparts
+          POSTGRES_PASSWORD: ci_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U oemparts"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Overrides for app/config.py (no .env file exists in CI).
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: "5432"
+      POSTGRES_PASSWORD: ci_test_password
+      BASIC_AUTH_PASSWORD: ci-test-password
+      SESSION_SECRET_KEY: ci-test-session-secret
+      AUTH_BACKEND: basic
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          # Pin ruff to the version used in the local .venv — requirements.txt
+          # allows >=0.4,<1.0, and a newer ruff in CI enforces rules the
+          # codebase was never linted against (61 spurious findings on the
+          # first run). Bump this pin together with the local venv.
+          pip install "ruff==0.15.11"
+
+      - name: Lint (ruff)
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: Create test database
+        run: PGPASSWORD=ci_test_password psql -h 127.0.0.1 -U oemparts -d oemparts -c "CREATE DATABASE oemparts_test;"
+
+      - name: Run migrations (validates the Alembic chain)
+        run: PYTHONPATH=$PWD alembic upgrade head
+
+      - name: Run tests
+        run: pytest

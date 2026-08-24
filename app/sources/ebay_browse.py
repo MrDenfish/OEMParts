@@ -1,7 +1,7 @@
 """eBay Browse API client.
 
-Handles item search with compatibility filters, pagination, response
-normalization, and API quota logging.
+Handles item search with fitment filtering, response normalization, and API
+quota logging.
 """
 
 import logging
@@ -18,8 +18,20 @@ from app.sources.ebay_oauth import get_ebay_token
 
 logger = logging.getLogger(__name__)
 
+
+class FitmentFilterError(Exception):
+    """Raised when a fitment-filtered Browse call fails; caller may retry without."""
+
+
 BROWSE_API_URL = "https://api.ebay.com/buy/browse/v1/item_summary/search"
 BROWSE_SANDBOX_URL = "https://api.sandbox.ebay.com/buy/browse/v1/item_summary/search"
+
+# eBay Browse "item_summary/search" errors live in the 12000-12999 errorId
+# range. Fitment-filter rejections (e.g. 12504 "invalid compatibility_filter",
+# 12506 "category does not support fitment") are a subset of that family.
+# Any other non-200 (429 rate limit, 5xx, etc.) is a transient/unrelated
+# failure and must not trigger the fitment retry's second API call.
+_FITMENT_ERROR_ID_RANGE = range(12000, 13000)
 
 
 @dataclass
@@ -38,6 +50,7 @@ class NormalizedListing:
     image_url: str | None
     ebay_end_date: datetime | None
     category_id: str | None
+    compatibility_match: str | None = None
 
 
 def _get_browse_url() -> str:
@@ -115,6 +128,8 @@ def _normalize_listing(item: dict) -> NormalizedListing | None:
     # Item URL
     item_url = item.get("itemWebUrl", "")
 
+    compatibility_match = item.get("compatibilityMatch")
+
     return NormalizedListing(
         ebay_item_id=ebay_item_id,
         title=title,
@@ -128,6 +143,7 @@ def _normalize_listing(item: dict) -> NormalizedListing | None:
         image_url=image_url,
         ebay_end_date=_parse_datetime(item.get("itemEndDate")),
         category_id=category_id,
+        compatibility_match=compatibility_match,
     )
 
 
@@ -143,10 +159,36 @@ def _log_api_call(
     db.flush()
 
 
+def _is_fitment_error(response: httpx.Response) -> bool:
+    """Return True if a non-200 response body is a genuine fitment error.
+
+    Parses the eBay error body defensively — a malformed or missing JSON
+    body, or one without an `errors` array, is treated as "not a fitment
+    error" (never raises here; the caller falls back to returning []).
+    """
+    try:
+        data = response.json()
+    except ValueError:
+        return False
+    if not isinstance(data, dict):
+        return False
+    errors = data.get("errors")
+    if not isinstance(errors, list):
+        return False
+    for error in errors:
+        if not isinstance(error, dict):
+            continue
+        error_id = error.get("errorId")
+        if isinstance(error_id, int) and error_id in _FITMENT_ERROR_ID_RANGE:
+            return True
+    return False
+
+
 def search_ebay(
     db: Session,
     query: str,
     compatibility_filter: str | None = None,
+    category_ids: str | None = None,
     max_price: Decimal | None = None,
     condition: str | None = None,
     limit: int | None = None,
@@ -156,13 +198,23 @@ def search_ebay(
     Args:
         db: Database session (for token management and quota logging).
         query: Search query string (e.g., "LR4 coolant crossover pipe").
-        compatibility_filter: Vehicle fitment filter (e.g., "Year:2012,Make:Land Rover,Model:LR4").
+        compatibility_filter: Vehicle fitment filter (e.g., "Year:2012;Make:Land Rover;Model:LR4").
+        category_ids: Leaf category id required by eBay when compatibility_filter
+            is set — resolved via the taxonomy module.
         max_price: Maximum price filter.
         condition: Condition filter — "New", "Used", or None for all.
         limit: Max results to return (defaults to config value).
 
     Returns:
         List of NormalizedListing objects. Empty list on API errors.
+
+    Raises:
+        FitmentFilterError: When a request with compatibility_filter gets a
+            non-200 response whose body reports a genuine eBay fitment error
+            (errorId in the 12000-12999 Browse-search family, e.g. 12504,
+            12506). Other non-200 responses (429 rate limit, 5xx, malformed
+            error bodies) return [] instead — they must not trigger the
+            caller's fallback retry.
     """
     # eBay Browse API condition IDs
     condition_ids = {"new": "1000", "used": "3000"}
@@ -177,9 +229,8 @@ def search_ebay(
     }
     if compatibility_filter:
         params["compatibility_filter"] = compatibility_filter
-        # eBay requires a fitment-supporting category when using compatibility_filter.
-        # 6028 = "eBay Motors Parts & Accessories" (top-level fitment category).
-        params["category_ids"] = "6028"
+    if category_ids:
+        params["category_ids"] = category_ids
 
     # Build the filter string (combines price and condition)
     filters: list[str] = []
@@ -215,9 +266,21 @@ def search_ebay(
                 query,
                 response.text[:200],
             )
+            if compatibility_filter and _is_fitment_error(response):
+                raise FitmentFilterError(
+                    f"Browse API returned {status_code} with compatibility_filter set"
+                )
             return []
 
-        data = response.json()
+        try:
+            data = response.json()
+        except ValueError as exc:
+            logger.error(
+                "eBay Browse API returned invalid JSON for query '%s': %s",
+                query,
+                exc,
+            )
+            return []
         item_summaries = data.get("itemSummaries", [])
 
         if not item_summaries:

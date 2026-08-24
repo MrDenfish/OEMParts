@@ -163,6 +163,8 @@ def create_search(
     condition_filter: str | None = None,
     is_high_priority: bool = False,
     oem_only: bool = False,
+    category_id: str | None = None,
+    category_name: str | None = None,
 ) -> Search:
     """Create a new search for a user."""
     search = Search(
@@ -174,6 +176,8 @@ def create_search(
         condition_filter=condition_filter,
         is_high_priority=is_high_priority,
         oem_only=oem_only,
+        category_id=category_id,
+        category_name=category_name,
     )
     db.add(search)
     db.flush()
@@ -246,6 +250,7 @@ def upsert_listing(
     image_url: str | None = None,
     ebay_end_date: datetime | None = None,
     category_id: str | None = None,
+    compatibility_checked: bool = False,
 ) -> tuple[Listing, bool]:
     """Insert or update a listing by ebay_item_id.
 
@@ -266,6 +271,10 @@ def upsert_listing(
         existing.ebay_end_date = ebay_end_date
         existing.last_seen_at = utcnow()
         existing.is_active = True
+        if compatibility_checked:
+            # Never downgrade: once eBay has confirmed fitment for this
+            # listing, a later unfiltered fetch doesn't unconfirm it.
+            existing.compatibility_checked = True
         db.flush()
         return existing, False
 
@@ -282,6 +291,7 @@ def upsert_listing(
         image_url=image_url,
         ebay_end_date=ebay_end_date,
         category_id=category_id,
+        compatibility_checked=compatibility_checked,
         is_active=True,
     )
     db.add(listing)

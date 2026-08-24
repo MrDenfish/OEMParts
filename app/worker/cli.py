@@ -1,7 +1,7 @@
 """CLI entry point for OEMParts worker commands.
 
 Uses argparse (stdlib) with subparsers for each command.
-Commands: fetch, cleanup, health.
+Commands: fetch, cleanup, health, taxonomy-sync.
 """
 
 import argparse
@@ -66,6 +66,24 @@ def cmd_health(args: argparse.Namespace) -> None:
         print(json.dumps(health, indent=2))
 
 
+def cmd_taxonomy_sync(args: argparse.Namespace) -> None:
+    """Resolve eBay fitment categories for active searches."""
+    setup_logging()
+    from app.worker.taxonomy_sync import run_taxonomy_sync
+
+    with get_session() as db:
+        results = run_taxonomy_sync(db, resolve_all=args.resolve_all)
+        # print() is acceptable here — CLI user-facing output (per CLAUDE.md)
+        for search, resolved in results:
+            outcome = (
+                f"{resolved.category_id}  {resolved.category_name}"
+                if resolved
+                else "no fitment category (fallback mode)"
+            )
+            print(f"{search.query_text!r:40s} -> {outcome}")
+        print(f"{len(results)} searches processed")
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the CLI argument parser."""
     parser = argparse.ArgumentParser(
@@ -99,6 +117,19 @@ def build_parser() -> argparse.ArgumentParser:
     health_parser = subparsers.add_parser("health", help="Print system health JSON")
     health_parser.set_defaults(func=cmd_health)
 
+    # taxonomy-sync
+    taxonomy_parser = subparsers.add_parser(
+        "taxonomy-sync",
+        help="Resolve eBay fitment categories for active searches",
+    )
+    taxonomy_parser.add_argument(
+        "--all",
+        dest="resolve_all",
+        action="store_true",
+        help="Re-resolve every active search, not just those missing a category",
+    )
+    taxonomy_parser.set_defaults(func=cmd_taxonomy_sync)
+
     return parser
 
 
@@ -113,3 +144,7 @@ def main() -> None:
     except Exception as exc:
         logging.getLogger(__name__).exception("CLI command failed: %s", exc)
         sys.exit(1)
+
+
+if __name__ == "__main__":  # pragma: no cover
+    main()
