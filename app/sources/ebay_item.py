@@ -41,8 +41,12 @@ def _get_item_url() -> str:
 
 
 def _log_api_call(db: Session, status_code: int | None) -> None:
+    # Commit (not flush): quota accounting must survive a caller's later
+    # rollback — the enrichment loop rolls back on per-listing failures,
+    # and a flushed-but-uncommitted row would be silently discarded,
+    # undercounting usage against the 5,000/day budget.
     db.add(ApiQuotaLog(provider="ebay_item", status_code=status_code))
-    db.flush()
+    db.commit()
 
 
 def _clip(value: object) -> str | None:

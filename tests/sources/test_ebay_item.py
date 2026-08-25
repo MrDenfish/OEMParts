@@ -244,3 +244,21 @@ def test_every_call_inserts_one_quota_log_row_connect_error(
     assert len(rows) == 1
     assert rows[0].provider == "ebay_item"
     assert rows[0].status_code is None
+
+
+def test_quota_row_survives_caller_rollback(
+    monkeypatch: pytest.MonkeyPatch, db_session: Session
+) -> None:
+    """Quota accounting must be durable against the enrichment loop's
+    per-listing rollback: a transient-failure call's row is committed by
+    _log_api_call, so a later db.rollback() cannot discard it."""
+    monkeypatch.setattr(ebay_item.httpx, "get", lambda *a, **k: _response(500))
+
+    result = fetch_item_aspects(db_session, "v1|123456|0")
+    assert result is None
+
+    db_session.rollback()
+
+    rows = _quota_rows(db_session)
+    assert len(rows) == 1
+    assert rows[0].status_code == 500
