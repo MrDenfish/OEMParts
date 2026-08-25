@@ -27,6 +27,10 @@ def _force_basic_auth(monkeypatch: pytest.MonkeyPatch) -> None:
     the same pattern.
     """
     monkeypatch.setattr(settings, "auth_backend", "basic")
+    # Same hermeticity hazard as auth_backend: the developer's .env may have
+    # AI_FILTER_ENABLED=true, which would flip the crafting-disabled tests
+    # onto the AI path. Tests that want the AI path patch it back on.
+    monkeypatch.setattr(settings, "ai_filter_enabled", False)
 
 
 @pytest.fixture()
