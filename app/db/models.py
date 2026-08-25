@@ -197,6 +197,20 @@ class Listing(Base):
         DateTime(timezone=True), default=utcnow, nullable=False
     )
     category_id: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    brand: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, comment="eBay Item Specifics Brand aspect"
+    )
+    mpn: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, comment="Manufacturer Part Number aspect"
+    )
+    oe_part_number: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, comment="OE/OEM Part Number aspect (verbatim)"
+    )
+    aspects_fetched_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="When getItem aspects lookup succeeded; NULL = pending/retry",
+    )
     compatibility_checked: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False
     )
