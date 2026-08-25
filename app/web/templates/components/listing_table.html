@@ -25,9 +25,12 @@
                 <span class="badge badge-inactive" title="Classified as an accessory for this search">acc</span>
             {% elif extras and extras.relevance == 'unrelated' %}
                 <span class="badge badge-inactive" title="Classified as unrelated to this search">off</span>
+            {% elif extras and extras.relevance == 'offbrand' %}
+                <span class="badge badge-inactive" title="Classified as a different brand than this search asks for">alt</span>
             {% endif %}
         </div>
     </td>
+    <td>{{ listing.brand or '—' }}</td>
     <td class="listing-price">{{ listing.price|format_price }}</td>
     <td>{{ listing.condition or '—' }}</td>
     <td>

@@ -367,6 +367,20 @@ class TestAIClassificationPass:
         assert created == 0
         assert other[test_search.id] == 1  # counted, not alerted
 
+    def test_classified_offbrand_not_notable(
+        self, db_session: Session, test_user: User, test_search: Search
+    ) -> None:
+        """An offbrand verdict demotes a would-be-notable new listing."""
+        seed_baseline(db_session, test_search)
+        cheap_new = make_listing(db_session, "50.00", days_old=0.1)  # below p25
+        link(db_session, test_search, cheap_new)
+        queries.set_link_relevance(db_session, test_search.id, cheap_new.id, "offbrand")
+        created, other = digest.scan_and_record(
+            db_session, test_user.id, utcnow() - timedelta(days=1)
+        )
+        assert created == 0
+        assert other[test_search.id] == 1  # counted, not alerted
+
     def test_part_and_null_still_notable(
         self, db_session: Session, test_user: User, test_search: Search
     ) -> None:
