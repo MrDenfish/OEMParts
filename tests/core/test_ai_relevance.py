@@ -25,12 +25,21 @@ def make_search(**kw) -> Search:
     return Search(**defaults)  # type: ignore[arg-type]
 
 
-def make_listing(title: str, price: str) -> Listing:
+def make_listing(
+    title: str,
+    price: str,
+    brand: str | None = None,
+    mpn: str | None = None,
+    oe_part_number: str | None = None,
+) -> Listing:
     listing = Listing(
         ebay_item_id=f"v1|{uuid.uuid4().hex[:12]}|0",
         title=title,
         price=Decimal(price),
         item_url="https://www.ebay.com/itm/1",
+        brand=brand,
+        mpn=mpn,
+        oe_part_number=oe_part_number,
     )
     listing.id = uuid.uuid4()
     return listing
@@ -189,6 +198,56 @@ class TestClassifyListings:
         assert (
             ai_relevance.classify_listings(make_search(), [make_listing("x", "1.00")])
             is None
+        )
+
+    def test_offbrand_verdict_accepted(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        listings = [make_listing("Generic compressor", "99.99")]
+        patch_client(
+            monkeypatch,
+            fake_response({"verdicts": [{"index": 0, "verdict": "offbrand"}]}),
+        )
+        result = ai_relevance.classify_listings(make_search(), listings)
+        assert result == {listings[0].id: "offbrand"}
+
+    def test_prompt_includes_aspects(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        listings = [
+            make_listing(
+                "Air suspension compressor",
+                "230.65",
+                brand="Dorman",
+                mpn="949-919",
+                oe_part_number="LR124471",
+            )
+        ]
+        client = patch_client(
+            monkeypatch, fake_response({"verdicts": [{"index": 0, "verdict": "part"}]})
+        )
+        ai_relevance.classify_listings(make_search(), listings)
+        prompt = client.messages.create.call_args.kwargs["messages"][0]["content"]
+        assert "Brand: Dorman" in prompt
+        assert "MPN: 949-919" in prompt
+        assert "OE#: LR124471" in prompt
+
+    def test_prompt_omits_null_aspects(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        listings = [make_listing("Air suspension compressor", "230.65")]
+        client = patch_client(
+            monkeypatch, fake_response({"verdicts": [{"index": 0, "verdict": "part"}]})
+        )
+        ai_relevance.classify_listings(make_search(), listings)
+        prompt = client.messages.create.call_args.kwargs["messages"][0]["content"]
+        # The prompt's instruction prose mentions "Brand/MPN/OE# fields" —
+        # scope the negative assertion to the listings section only.
+        listings_section = prompt.split("Listings:")[-1]
+        assert "Brand:" not in listings_section
+        assert "MPN:" not in listings_section
+        assert "OE#:" not in listings_section
+
+    def test_schema_contains_offbrand(self) -> None:
+        assert (
+            "offbrand"
+            in ai_relevance.CLASSIFY_SCHEMA["properties"]["verdicts"]["items"][
+                "properties"
+            ]["verdict"]["enum"]
         )
 
 
