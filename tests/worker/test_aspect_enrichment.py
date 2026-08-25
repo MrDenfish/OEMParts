@@ -4,9 +4,10 @@ import uuid
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import Listing, utcnow
+from app.db.models import FetchRun, Listing, utcnow
 from app.sources.ebay_item import ItemAspects
 from app.worker import fetcher
 
@@ -122,3 +123,21 @@ def test_already_stamped_listing_skipped(
 
     assert count == 0
     assert calls == []
+
+
+def test_enrichment_failure_does_not_abort_the_fetch_cycle(
+    monkeypatch: pytest.MonkeyPatch, db_session: Session
+) -> None:
+    """An exception during enrichment must not leave the fetch_runs row dangling."""
+    _make_listing(db_session)
+
+    def _raise(db, ebay_item_id):
+        raise RuntimeError("OAuth refresh blew up")
+
+    monkeypatch.setattr(fetcher, "fetch_item_aspects", _raise)
+
+    fetcher.run_fetch_cycle(db_session, cycle_type="nightly")
+
+    runs = list(db_session.execute(select(FetchRun)).scalars())
+    assert len(runs) == 1
+    assert runs[0].completed_at is not None

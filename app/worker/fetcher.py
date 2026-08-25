@@ -103,9 +103,12 @@ def run_fetch_cycle(
             total_errors += 1
             # Continue to next search — don't abort the cycle
 
-    enriched = enrich_listing_aspects(db)
-    if enriched:
-        logger.info("Enriched %d listings with Item Specifics", enriched)
+    try:
+        enriched = enrich_listing_aspects(db)
+        if enriched:
+            logger.info("Enriched %d listings with Item Specifics", enriched)
+    except Exception:
+        logger.exception("Aspect enrichment failed; completing cycle anyway")
 
     # Complete the fetch run record
     queries.complete_fetch_run(
