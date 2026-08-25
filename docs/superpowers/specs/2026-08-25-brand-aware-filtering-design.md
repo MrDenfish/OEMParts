@@ -26,9 +26,12 @@ explicitly asks for AMK.
 
 **Goals**
 
-- **Capture ground truth:** store each listing's `Brand` and `Manufacturer
-  Part Number` from eBay's `getItem` endpoint — one call per listing,
-  once ever, quota-logged, fail-soft.
+- **Capture ground truth:** store each listing's `Brand`, `Manufacturer
+  Part Number`, and `OE/OEM Part Number` from eBay's `getItem` endpoint —
+  one call per listing, once ever, quota-logged, fail-soft. (Owner's
+  example 358921125862: `Brand: Unbranded` but `OE/OEM Part Number:
+  LR124471` — the structured OE number is a far stronger match signal
+  than title text.)
 - **Give the AI the truth:** include Brand/MPN lines in the classification
   prompt so verdicts stop depending on title honesty.
 - **New verdict `offbrand`:** a functional substitute from a different
@@ -36,7 +39,10 @@ explicitly asks for AMK.
   "notable" digest alerts exactly like `accessory`/`unrelated`; tagged on
   the dashboard for audit. Genuine/OE items are never `offbrand` (the
   Genuine Land Rover LR072537 assembly IS the AMK-built part). Queries
-  that name no brand never produce `offbrand`.
+  that name no brand never produce `offbrand`, and a missing or literal
+  `Unbranded` brand is never `offbrand` either — unbranded listings with
+  a matching OE number (owner's alternator example 358921125862) must
+  survive to be judged on their merits.
 - **Show the brand:** dashboard listings display the stored brand so
   title deception is visible at a glance.
 - **One-time re-classification:** after brand backfill, reset all existing
@@ -53,6 +59,13 @@ explicitly asks for AMK.
   (looked-up-and-empty is a final state).
 - Filtering or hiding offbrand listings in the dashboard (tags only,
   same policy as the existing `acc`/`off` tags).
+- **Tier 2 — photo/description deep inspection** (parked for its own
+  spec after this ships): a per-listing vision pass over item photos and
+  seller description, run only for digest-notable candidates (~2-5/day).
+  Live-probed 2026-08-25 on the owner's alternator example: the app's
+  model read LR124471 off the JLR part-label photo and caught a
+  DENSO-vs-Made-in-Germany contradiction. Deferred so this PR stays
+  focused and Tier 2 can consume Tier 1's real data.
 - Deleting the five stale AMK-search links that matched while OEM-only
   was toggled off — the re-classification pass will tag/demote them
   instead, which keeps the audit trail.
@@ -85,6 +98,9 @@ explicitly asks for AMK.
   falling back to the `Brand` localized aspect.
 - `mpn` — `String(100)`, nullable. From the `Manufacturer Part Number`
   aspect.
+- `oe_part_number` — `String(100)`, nullable. From the `OE/OEM Part
+  Number` aspect (may contain several space-separated numbers; stored
+  verbatim, truncated to 100 chars).
 - `aspects_fetched_at` — `TIMESTAMPTZ`, nullable. Stamped when a lookup
   **succeeds** (even if the seller left Brand blank). NULL = not yet
   looked up (or last attempt failed → retried next cycle).
@@ -96,6 +112,7 @@ explicitly asks for AMK.
 class ItemAspects:
     brand: str | None
     mpn: str | None
+    oe_part_number: str | None
 
 def fetch_item_aspects(db: Session, ebay_item_id: str) -> ItemAspects | None
 ```
@@ -130,12 +147,14 @@ architecture rule.
 - `VERDICTS = ("part", "accessory", "unrelated", "offbrand")`; the
   json_schema enum gains `offbrand`.
 - Each numbered listing line gains structured-truth suffixes when known:
-  `— Brand: Dorman — MPN: 949-919`.
+  `— Brand: Dorman — MPN: 949-919 — OE#: LR124471`.
 - Prompt instruction added: *if the search query names a brand or
   manufacturer, a functionally equivalent item from a different brand is
   `offbrand`; trust the Brand field over words in the title; genuine/OE
-  branded items for the vehicle are `part`, not `offbrand`; if the query
-  names no brand, never use `offbrand`.*
+  branded items for the vehicle are `part`, not `offbrand`; a missing or
+  "Unbranded" brand is never grounds for `offbrand`; a structured OE#
+  matching the search's wanted OEM number is strong evidence of `part`;
+  if the query names no brand, never use `offbrand`.*
 - `craft_query` unchanged.
 
 ### 4.5 Digest and dashboard
@@ -161,8 +180,9 @@ The next digest re-classifies everything with brand data (~11 calls,
 
 All external calls mocked; suite stays hermetic:
 
-1. `ebay_item`: aspect extraction (top-level brand + aspect fallback),
-   404-stamps-timestamp, error-returns-None-and-retries, quota logging.
+1. `ebay_item`: aspect extraction (top-level brand + aspect fallback,
+   MPN, OE/OEM Part Number), 404-stamps-timestamp,
+   error-returns-None-and-retries, quota logging.
 2. Enrichment: cap respected; failure leaves `aspects_fetched_at` NULL;
    success persists brand/mpn; already-fetched listings skipped.
 3. Classifier: prompt contains Brand/MPN lines when present and omits
