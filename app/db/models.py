@@ -229,6 +229,14 @@ class SearchListing(Base):
     matched_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
     )
+    relevance: Mapped[str | None] = mapped_column(
+        String(10),
+        nullable=True,
+        comment="AI verdict: part | accessory | unrelated; NULL = unclassified",
+    )
+    relevance_checked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # Relationships
     search: Mapped["Search"] = relationship(back_populates="search_listings")

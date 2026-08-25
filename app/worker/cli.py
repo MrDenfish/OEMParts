@@ -94,6 +94,7 @@ def cmd_digest(args: argparse.Namespace) -> None:
         # print() is acceptable here — CLI user-facing output (per CLAUDE.md)
         print(f"alerts created: {summary.alerts_created}")
         print(f"emails sent:    {summary.emails_sent}")
+        print(f"classified:     {summary.classified}")
         if summary.skipped_reason:
             print(f"note: sending skipped ({summary.skipped_reason})")
 

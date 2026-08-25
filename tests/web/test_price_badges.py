@@ -113,3 +113,29 @@ def test_median_dash_below_minimum(
     page = authed_client.get("/searches/")
     assert page.status_code == 200
     assert "<th>Median $</th>" in page.text  # column exists even with no stats
+
+
+def test_relevance_tags_render(
+    authed_client: TestClient, db_session: Session, test_search: Search
+) -> None:
+    from app.db import queries
+
+    dropper = seed(db_session, test_search)  # 5 listings incl. the 25.00 one
+    queries.set_link_relevance(db_session, test_search.id, dropper.id, "accessory")
+    db_session.commit()
+    page = authed_client.get(f"/listings/?search_id={test_search.id}")
+    assert page.status_code == 200
+    assert "Classified as an accessory for this search" in page.text
+
+
+def test_unrelated_tag_renders(
+    authed_client: TestClient, db_session: Session, test_search: Search
+) -> None:
+    from app.db import queries
+
+    dropper = seed(db_session, test_search)  # 5 listings incl. the 25.00 one
+    queries.set_link_relevance(db_session, test_search.id, dropper.id, "unrelated")
+    db_session.commit()
+    page = authed_client.get(f"/listings/?search_id={test_search.id}")
+    assert page.status_code == 200
+    assert "Classified as unrelated to this search" in page.text
