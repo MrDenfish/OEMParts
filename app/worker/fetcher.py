@@ -12,8 +12,35 @@ from sqlalchemy.orm import Session
 from app.core.deduplicator import should_skip_search
 from app.core.search_runner import run_single_search
 from app.db import queries
+from app.db.models import utcnow
+from app.sources.ebay_item import fetch_item_aspects
 
 logger = logging.getLogger(__name__)
+
+ASPECT_CAP_PER_CYCLE = 200
+
+
+def enrich_listing_aspects(db: Session, cap: int = ASPECT_CAP_PER_CYCLE) -> int:
+    """Fetch Item Specifics for listings that never got them. Returns count.
+
+    One getItem call per listing, once ever (transient failures retry on a
+    later cycle). Worker-only by design — request handlers never call this.
+    """
+    pending = queries.get_listings_needing_aspects(db, cap)
+    if len(pending) == cap:
+        logger.info("Aspect enrichment cap (%d) reached; remainder next cycle", cap)
+    enriched = 0
+    for listing in pending:
+        aspects = fetch_item_aspects(db, listing.ebay_item_id)
+        if aspects is None:
+            continue
+        listing.brand = aspects.brand
+        listing.mpn = aspects.mpn
+        listing.oe_part_number = aspects.oe_part_number
+        listing.aspects_fetched_at = utcnow()
+        db.commit()
+        enriched += 1
+    return enriched
 
 
 def run_fetch_cycle(
@@ -75,6 +102,10 @@ def run_fetch_cycle(
             logger.exception("Error processing search %s", search.id)
             total_errors += 1
             # Continue to next search — don't abort the cycle
+
+    enriched = enrich_listing_aspects(db)
+    if enriched:
+        logger.info("Enriched %d listings with Item Specifics", enriched)
 
     # Complete the fetch run record
     queries.complete_fetch_run(
