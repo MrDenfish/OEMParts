@@ -1,14 +1,16 @@
 """AI relevance classification and query crafting (fail-open).
 
 Two touchpoints (spec §4.2): classify_listings — one call per search
-batching listing titles into part/accessory/unrelated verdicts via
-structured outputs — and craft_query, a one-shot query refinement at
+batching listing titles into part/accessory/unrelated/offbrand verdicts
+via structured outputs — and craft_query, a one-shot query refinement at
 search creation. Every failure path returns None; callers treat None
 as "behave exactly as before". The API key is never logged.
 
-Listing titles are seller-controlled text interpolated into prompts;
-structured outputs (JSON schema, enum verdicts) bound the blast radius
-of a hostile title to a wrong verdict, not arbitrary model behavior.
+Listing titles are seller-controlled text interpolated into prompts, and
+so are the Brand/MPN/OE# Item Specifics aspect values fetched as ground
+truth; structured outputs (JSON schema, enum verdicts) bound the blast
+radius of a hostile title or aspect value to a wrong verdict, not
+arbitrary model behavior.
 """
 
 import json

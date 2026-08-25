@@ -125,6 +125,31 @@ def test_already_stamped_listing_skipped(
     assert calls == []
 
 
+def test_poison_listing_does_not_starve_the_queue(
+    monkeypatch: pytest.MonkeyPatch, db_session: Session
+) -> None:
+    """One listing whose fetch_item_aspects call raises must not stop the
+    others behind it in the oldest-first queue from being enriched."""
+    poison = _make_listing(db_session)
+    healthy = _make_listing(db_session)
+
+    def _fake_fetch(db, ebay_item_id):
+        if ebay_item_id == poison.ebay_item_id:
+            raise ValueError("malformed response shape")
+        return ItemAspects(brand="Dorman", mpn=None, oe_part_number=None)
+
+    monkeypatch.setattr(fetcher, "fetch_item_aspects", _fake_fetch)
+
+    count = fetcher.enrich_listing_aspects(db_session)
+
+    assert count == 1
+    db_session.refresh(poison)
+    db_session.refresh(healthy)
+    assert poison.aspects_fetched_at is None
+    assert healthy.aspects_fetched_at is not None
+    assert healthy.brand == "Dorman"
+
+
 def test_enrichment_failure_does_not_abort_the_fetch_cycle(
     monkeypatch: pytest.MonkeyPatch, db_session: Session
 ) -> None:

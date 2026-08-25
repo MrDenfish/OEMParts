@@ -40,7 +40,7 @@ def test_top_level_brand_and_aspects_all_extracted(
     }
     monkeypatch.setattr(ebay_item.httpx, "get", lambda *a, **k: _response(200, payload))
 
-    result = fetch_item_aspects(db_session, "123456")
+    result = fetch_item_aspects(db_session, "v1|123456|0")
 
     assert result == ItemAspects(
         brand="Dorman", mpn="949-919", oe_part_number="LR124471"
@@ -57,7 +57,7 @@ def test_no_top_level_brand_uses_brand_aspect(
     }
     monkeypatch.setattr(ebay_item.httpx, "get", lambda *a, **k: _response(200, payload))
 
-    result = fetch_item_aspects(db_session, "123456")
+    result = fetch_item_aspects(db_session, "v1|123456|0")
 
     assert result == ItemAspects(brand="Dorman", mpn=None, oe_part_number=None)
 
@@ -67,7 +67,7 @@ def test_no_aspects_at_all_is_success_with_all_none(
 ) -> None:
     monkeypatch.setattr(ebay_item.httpx, "get", lambda *a, **k: _response(200, {}))
 
-    result = fetch_item_aspects(db_session, "123456")
+    result = fetch_item_aspects(db_session, "v1|123456|0")
 
     assert result == ItemAspects(brand=None, mpn=None, oe_part_number=None)
 
@@ -77,7 +77,7 @@ def test_404_is_success_with_nothing(
 ) -> None:
     monkeypatch.setattr(ebay_item.httpx, "get", lambda *a, **k: _response(404))
 
-    result = fetch_item_aspects(db_session, "123456")
+    result = fetch_item_aspects(db_session, "v1|123456|0")
 
     assert result == ItemAspects(brand=None, mpn=None, oe_part_number=None)
 
@@ -87,7 +87,7 @@ def test_410_is_success_with_nothing(
 ) -> None:
     monkeypatch.setattr(ebay_item.httpx, "get", lambda *a, **k: _response(410))
 
-    result = fetch_item_aspects(db_session, "123456")
+    result = fetch_item_aspects(db_session, "v1|123456|0")
 
     assert result == ItemAspects(brand=None, mpn=None, oe_part_number=None)
 
@@ -97,7 +97,7 @@ def test_500_returns_none_for_retry(
 ) -> None:
     monkeypatch.setattr(ebay_item.httpx, "get", lambda *a, **k: _response(500))
 
-    result = fetch_item_aspects(db_session, "123456")
+    result = fetch_item_aspects(db_session, "v1|123456|0")
 
     assert result is None
 
@@ -110,7 +110,7 @@ def test_connect_error_returns_none_for_retry(
 
     monkeypatch.setattr(ebay_item.httpx, "get", _raise)
 
-    result = fetch_item_aspects(db_session, "123456")
+    result = fetch_item_aspects(db_session, "v1|123456|0")
 
     assert result is None
 
@@ -128,7 +128,7 @@ def test_long_values_truncated_to_100_chars(
     }
     monkeypatch.setattr(ebay_item.httpx, "get", lambda *a, **k: _response(200, payload))
 
-    result = fetch_item_aspects(db_session, "123456")
+    result = fetch_item_aspects(db_session, "v1|123456|0")
 
     assert result is not None
     assert result.brand is not None and len(result.brand) == 100
@@ -136,12 +136,67 @@ def test_long_values_truncated_to_100_chars(
     assert result.oe_part_number is not None and len(result.oe_part_number) == 100
 
 
+def test_non_string_aspect_value_is_clipped_to_none(
+    monkeypatch: pytest.MonkeyPatch, db_session: Session
+) -> None:
+    """A poison listing whose aspect values aren't strings (e.g. a nested
+    dict/list from a malformed eBay response) must not raise — _clip treats
+    anything non-str as None so the listing is still a final, storable
+    result rather than blowing up the enrichment loop."""
+    payload = {
+        "brand": {"unexpected": "shape"},
+        "localizedAspects": [
+            {"name": "Manufacturer Part Number", "value": ["149-919"]},
+            {"name": "OE/OEM Part Number", "value": 12345},
+        ],
+    }
+    monkeypatch.setattr(ebay_item.httpx, "get", lambda *a, **k: _response(200, payload))
+
+    result = fetch_item_aspects(db_session, "v1|123456|0")
+
+    assert result == ItemAspects(brand=None, mpn=None, oe_part_number=None)
+
+
+def test_url_is_percent_encoded_not_double_wrapped(
+    monkeypatch: pytest.MonkeyPatch, db_session: Session
+) -> None:
+    """ebay_item_id already carries eBay's full RESTful ID (e.g. "v1|...|0");
+    the URL must percent-encode it once, not re-wrap it in another shell."""
+    captured_urls: list[str] = []
+
+    def _fake_get(url, *a, **k):
+        captured_urls.append(url)
+        return _response(200, {})
+
+    monkeypatch.setattr(ebay_item.httpx, "get", _fake_get)
+
+    fetch_item_aspects(db_session, "v1|123456|0")
+
+    assert captured_urls == ["https://api.ebay.com/buy/browse/v1/item/v1%7C123456%7C0"]
+
+
+def test_non_dict_json_body_returns_none_for_retry(
+    monkeypatch: pytest.MonkeyPatch, db_session: Session
+) -> None:
+    """A 200 with a surprise JSON shape (e.g. a list) is fail-soft, not final —
+    it must retry next cycle, not be treated as success-with-nothing."""
+    monkeypatch.setattr(ebay_item.httpx, "get", lambda *a, **k: _response(200, [1, 2]))
+
+    result = fetch_item_aspects(db_session, "v1|123456|0")
+
+    assert result is None
+    rows = _quota_rows(db_session)
+    assert len(rows) == 1
+    assert rows[0].provider == "ebay_item"
+    assert rows[0].status_code == 200
+
+
 def test_every_call_inserts_one_quota_log_row_200(
     monkeypatch: pytest.MonkeyPatch, db_session: Session
 ) -> None:
     monkeypatch.setattr(ebay_item.httpx, "get", lambda *a, **k: _response(200, {}))
 
-    fetch_item_aspects(db_session, "123456")
+    fetch_item_aspects(db_session, "v1|123456|0")
 
     rows = _quota_rows(db_session)
     assert len(rows) == 1
@@ -154,7 +209,7 @@ def test_every_call_inserts_one_quota_log_row_404(
 ) -> None:
     monkeypatch.setattr(ebay_item.httpx, "get", lambda *a, **k: _response(404))
 
-    fetch_item_aspects(db_session, "123456")
+    fetch_item_aspects(db_session, "v1|123456|0")
 
     rows = _quota_rows(db_session)
     assert len(rows) == 1
@@ -167,7 +222,7 @@ def test_every_call_inserts_one_quota_log_row_500(
 ) -> None:
     monkeypatch.setattr(ebay_item.httpx, "get", lambda *a, **k: _response(500))
 
-    fetch_item_aspects(db_session, "123456")
+    fetch_item_aspects(db_session, "v1|123456|0")
 
     rows = _quota_rows(db_session)
     assert len(rows) == 1
@@ -183,7 +238,7 @@ def test_every_call_inserts_one_quota_log_row_connect_error(
 
     monkeypatch.setattr(ebay_item.httpx, "get", _raise)
 
-    fetch_item_aspects(db_session, "123456")
+    fetch_item_aspects(db_session, "v1|123456|0")
 
     rows = _quota_rows(db_session)
     assert len(rows) == 1

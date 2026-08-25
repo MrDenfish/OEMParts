@@ -169,9 +169,16 @@ def test_brand_column_renders(
 def test_brand_column_renders_dash_when_none(
     authed_client: TestClient, db_session: Session, test_search: Search
 ) -> None:
-    """Brand column shows — when brand is None."""
+    """Brand column shows — when brand is None.
+
+    Every seeded listing gets a non-null condition so the condition cell
+    (also `<td>{{ value or '—' }}</td>`) never renders a dash — the only
+    `<td>—</td>` on the page can then only be the brand cell.
+    """
     seed(db_session, test_search)
+    for listing in db_session.query(Listing).all():
+        listing.condition = "Used"
+    db_session.commit()
     page = authed_client.get(f"/listings/?search_id={test_search.id}")
     assert page.status_code == 200
-    # The page should contain <td>—</td> for brand cells
     assert "<td>—</td>" in page.text

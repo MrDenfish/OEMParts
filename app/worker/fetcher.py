@@ -31,15 +31,22 @@ def enrich_listing_aspects(db: Session, cap: int = ASPECT_CAP_PER_CYCLE) -> int:
         logger.info("Aspect enrichment cap (%d) reached; remainder next cycle", cap)
     enriched = 0
     for listing in pending:
-        aspects = fetch_item_aspects(db, listing.ebay_item_id)
-        if aspects is None:
-            continue
-        listing.brand = aspects.brand
-        listing.mpn = aspects.mpn
-        listing.oe_part_number = aspects.oe_part_number
-        listing.aspects_fetched_at = utcnow()
-        db.commit()
-        enriched += 1
+        try:
+            aspects = fetch_item_aspects(db, listing.ebay_item_id)
+            if aspects is None:
+                continue
+            listing.brand = aspects.brand
+            listing.mpn = aspects.mpn
+            listing.oe_part_number = aspects.oe_part_number
+            listing.aspects_fetched_at = utcnow()
+            db.commit()
+            enriched += 1
+        except Exception:
+            # One poison listing must not starve the oldest-first queue —
+            # log and move on to the next listing, same pattern as the
+            # per-search guard in run_fetch_cycle below.
+            db.rollback()
+            logger.exception("Aspect enrichment failed for listing %s", listing.id)
     return enriched
 
 
