@@ -77,8 +77,13 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     ai_model: str = "claude-opus-5"
 
-    # Cleanup
-    listing_inactive_after_missing_cycles: int = 3
+    # Cleanup. The staleness window (fetch_default_ttl_minutes * cycles)
+    # must exceed the real refresh cadence: listings are only re-seen by
+    # the NIGHTLY fetch (~24h apart; intraday covers high-priority searches
+    # only), so 3 cycles (12h) deactivated the entire pool every morning
+    # and the fetch re-activated only the top-50 "best match" per search.
+    # 8 cycles = 32h covers the nightly gap plus a late wake-up.
+    listing_inactive_after_missing_cycles: int = 8
     listing_archive_after_days: int = 180
 
     @property
