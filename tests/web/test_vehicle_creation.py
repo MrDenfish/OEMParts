@@ -89,6 +89,44 @@ def test_decode_vin_failure_falls_back_to_dropdown(
     assert "<select" in response.text
 
 
+# --- GET /vehicles ---------------------------------------------------
+
+
+def test_vehicles_page_contains_vin_input_and_decode_button(
+    authed_client: TestClient,
+) -> None:
+    """Page has VIN input (name=vin_lookup) and button that posts to /vehicles/decode-vin."""
+    response = authed_client.get("/vehicles")
+    assert response.status_code == 200
+    assert 'name="vin_lookup"' in response.text
+    assert 'hx-post="/vehicles/decode-vin"' in response.text
+    assert "Decode VIN" in response.text
+
+
+def test_vehicles_page_contains_year_make_selects_and_fields_container(
+    authed_client: TestClient,
+) -> None:
+    """Page contains Year and Make selects with options, and #vehicle-fields container."""
+    response = authed_client.get("/vehicles")
+    assert response.status_code == 200
+    # Year select and options
+    assert '<select id="year"' in response.text
+    # Make select and "Land Rover" option
+    assert '<select id="make"' in response.text
+    assert 'value="Land Rover"' in response.text
+    # Container for fields
+    assert 'id="vehicle-fields"' in response.text
+
+
+def test_vehicles_page_contains_nickname_input(
+    authed_client: TestClient,
+) -> None:
+    """Page still has nickname input."""
+    response = authed_client.get("/vehicles")
+    assert response.status_code == 200
+    assert 'name="nickname"' in response.text
+
+
 # --- GET /vehicles/models ------------------------------------------------------
 
 

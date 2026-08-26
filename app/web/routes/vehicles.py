@@ -34,6 +34,9 @@ def vehicles_page(
             "active_page": "vehicles",
             "vehicles": vehicles,
             "user": current_user,
+            "makes": COMMON_MAKES,
+            "years": YEARS,
+            "mode": "dropdown",
         },
     )
 

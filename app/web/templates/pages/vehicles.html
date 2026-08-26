@@ -6,26 +6,27 @@
 <h1 class="page-title">My Vehicles</h1>
 
 <!-- Add Vehicle Form -->
+<form class="form-inline" style="margin-bottom: 0.5rem;"
+      hx-post="/vehicles/decode-vin" hx-target="#vehicle-fields" hx-swap="innerHTML">
+    <div class="form-group">
+        <label for="vin_lookup">Have a VIN?</label>
+        <input type="text" id="vin_lookup" name="vin_lookup" class="form-control"
+               maxlength="17" placeholder="17-character VIN" style="width: 220px;">
+    </div>
+    <div class="form-group">
+        <label>&nbsp;</label>
+        <button type="submit" class="btn btn-secondary">Decode VIN</button>
+    </div>
+</form>
+
 <form class="form-inline" hx-post="/vehicles" hx-target="#vehicle-list" hx-swap="beforeend">
-    <div class="form-group">
-        <label for="year">Year</label>
-        <input type="number" id="year" name="year" class="form-control" min="1900" max="2030" required style="width: 90px;">
-    </div>
-    <div class="form-group">
-        <label for="make">Make</label>
-        <input type="text" id="make" name="make" class="form-control" required placeholder="e.g. Land Rover" style="width: 150px;">
-    </div>
-    <div class="form-group">
-        <label for="model">Model</label>
-        <input type="text" id="model" name="model" class="form-control" required placeholder="e.g. LR4" style="width: 140px;">
-    </div>
-    <div class="form-group">
-        <label for="trim">Trim</label>
-        <input type="text" id="trim" name="trim" class="form-control" placeholder="Optional" style="width: 120px;">
+    <div id="vehicle-fields" class="form-inline" style="display: contents;">
+        {% include "components/vehicle_fields.html" %}
     </div>
     <div class="form-group">
         <label for="nickname">Nickname</label>
-        <input type="text" id="nickname" name="nickname" class="form-control" placeholder="Optional" style="width: 140px;">
+        <input type="text" id="nickname" name="nickname" class="form-control"
+               placeholder="Optional" style="width: 140px;">
     </div>
     <div class="form-group">
         <label>&nbsp;</label>
