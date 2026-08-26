@@ -15,6 +15,7 @@ arbitrary model behavior.
 
 import json
 import logging
+import re
 import uuid
 
 import anthropic
@@ -27,6 +28,16 @@ logger = logging.getLogger(__name__)
 
 VERDICTS = ("part", "accessory", "unrelated", "offbrand")
 MAX_CRAFTED_QUERY_LEN = 200
+
+_PART_NUMBER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9\-]{3,24}$")
+
+
+def looks_like_part_number(text: str) -> bool:
+    """True for a single alphanumeric token containing at least one digit —
+    the shape of a bare part number (LR072537, 949-919, 0221604022)."""
+    token = text.strip()
+    return bool(_PART_NUMBER_RE.match(token)) and any(ch.isdigit() for ch in token)
+
 
 CLASSIFY_SCHEMA = {
     "type": "object",
@@ -198,6 +209,9 @@ def craft_query(
         "handles that)\n"
         "- do NOT invent part numbers; do NOT include the part number in "
         "the query\n"
+        "- if the query does not name the part (e.g. it is only a part number "
+        "or code), return the original query UNCHANGED — never guess what "
+        "part a number refers to\n"
         "- return 2-5 words\n\n"
         f"Vehicle: {vehicle.year} {vehicle.make} {vehicle.model}\n"
         f"OEM part number: {oem_number or 'none'}\n"

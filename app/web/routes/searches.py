@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user
 from app.config import settings
-from app.core.ai_relevance import craft_query
+from app.core.ai_relevance import craft_query, looks_like_part_number
 from app.core.compatibility import resolve_fitment_category
 from app.core.price_stats import search_price_stats
 from app.core.search_runner import run_single_search
@@ -102,6 +102,18 @@ def create_search(
     if parsed_oem_number == "":
         parsed_oem_number = None
 
+    final_query = query_text.strip()
+
+    # Auto-copy (owner-approved UX, 2026-08-26 incident): if the OEM field
+    # is empty but the query text is itself the shape of a bare part
+    # number (e.g. "LR072537"), treat it as the OEM number too — typing
+    # only a part number as the search clearly means "this is the part
+    # number I want". Must run before default_oem_only is computed so the
+    # existing OEM-present default applies to the auto-set number exactly
+    # as if the user had typed it into the OEM field.
+    if parsed_oem_number is None and looks_like_part_number(final_query):
+        parsed_oem_number = final_query.upper()
+
     # Default ON when an OEM number is provided. The user wanted to
     # default OEM-only filtering on for searches that have a part number,
     # since that's the case where it most reliably trims aftermarket noise.
@@ -109,9 +121,14 @@ def create_search(
 
     # AI query crafting (spec §4.5): refine the query text before category
     # resolution so both benefit. Best-effort — any failure keeps the
-    # user's text verbatim.
-    final_query = query_text.strip()
-    if settings.ai_filter_enabled and settings.anthropic_api_key:
+    # user's text verbatim. Skipped for bare part numbers: the AI cannot
+    # know what a bare number is, and guessing caused the 2026-08-26
+    # incident (LR072537 guessed as "water pump", actually a compressor).
+    if (
+        settings.ai_filter_enabled
+        and settings.anthropic_api_key
+        and not looks_like_part_number(final_query)
+    ):
         vehicle = queries.get_vehicle_by_id(db, vehicle_id, current_user.id)
         if vehicle is not None:
             # category_name is None by design: crafting runs before

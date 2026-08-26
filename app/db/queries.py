@@ -81,6 +81,7 @@ def create_vehicle(
     model: str,
     trim: str | None = None,
     nickname: str | None = None,
+    vin: str | None = None,
 ) -> Vehicle:
     """Create a new vehicle for a user."""
     vehicle = Vehicle(
@@ -90,6 +91,7 @@ def create_vehicle(
         model=model,
         trim=trim,
         nickname=nickname,
+        vin=vin,
     )
     db.add(vehicle)
     db.flush()

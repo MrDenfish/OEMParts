@@ -226,3 +226,58 @@ class TestAIQueryCrafting:
             follow_redirects=False,
         )
         assert called.call_count == 0
+
+    def test_bare_part_number_skips_craft_and_auto_sets_oem(
+        self,
+        authed_client: TestClient,
+        db_session: Session,
+        test_vehicle: Vehicle,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Regression for the 2026-08-26 incident: a bare part number as
+        query_text (OEM field left empty) must not be handed to the AI
+        crafter to guess at, and must be auto-copied into oem_number with
+        oem_only defaulting on — exactly as if the user had typed it into
+        the OEM field."""
+        monkeypatch.setattr(settings, "ai_filter_enabled", True)
+        monkeypatch.setattr(settings, "anthropic_api_key", "sk-test")
+        called = MagicMock()
+        monkeypatch.setattr(searches_module, "craft_query", called)
+        monkeypatch.setattr(
+            searches_module, "resolve_fitment_category", lambda db, q: None
+        )
+        authed_client.post(
+            "/searches/",
+            data={"vehicle_id": str(test_vehicle.id), "query_text": "LR072537"},
+            follow_redirects=False,
+        )
+        assert called.call_count == 0
+        search = db_session.query(Search).filter_by(query_text="LR072537").one()
+        assert search.oem_number == "LR072537"
+        assert search.oem_only is True
+
+    def test_named_part_query_still_crafted(
+        self,
+        authed_client: TestClient,
+        db_session: Session,
+        test_vehicle: Vehicle,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Regression for over-blocking: an ordinary query that just
+        happens to contain a digit-bearing word must still go through the
+        AI crafter."""
+        monkeypatch.setattr(settings, "ai_filter_enabled", True)
+        monkeypatch.setattr(settings, "anthropic_api_key", "sk-test")
+        craft = MagicMock(return_value="AMK compressor")
+        monkeypatch.setattr(searches_module, "craft_query", craft)
+        monkeypatch.setattr(
+            searches_module, "resolve_fitment_category", lambda db, q: None
+        )
+        authed_client.post(
+            "/searches/",
+            data={"vehicle_id": str(test_vehicle.id), "query_text": "AMK compressor"},
+            follow_redirects=False,
+        )
+        assert craft.call_count == 1
+        search = db_session.query(Search).filter_by(query_text="AMK compressor").one()
+        assert search is not None
