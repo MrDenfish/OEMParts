@@ -7,6 +7,7 @@ import httpx
 import pytest
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.db.models import NhtsaModelCache, VinDecodeCache, utcnow
 from app.sources import nhtsa_vpic
 from app.sources.nhtsa_vpic import (
@@ -108,6 +109,35 @@ def test_decode_vin_clean_decode_returns_values_and_writes_cache(
     assert cached is not None
     assert cached.raw_json is not None
     assert cached.decoded_at is not None
+
+
+def test_decode_vin_forces_httpx_logger_to_warning(
+    monkeypatch: pytest.MonkeyPatch, db_session: Session
+) -> None:
+    """Module import must clamp the httpx logger so INFO-level full-URL
+
+    (VIN-containing) request logs can never leak, even if some future
+    entrypoint calls logging.basicConfig().
+    """
+    payload = {
+        "Results": [
+            {
+                "ModelYear": "2012",
+                "Make": "LAND ROVER",
+                "Model": "LR4",
+                "Trim": "HSE",
+                "BodyClass": "SUV",
+                "ErrorCode": "0",
+            }
+        ]
+    }
+    monkeypatch.setattr(
+        nhtsa_vpic.httpx, "get", lambda *a, **k: _response(200, payload)
+    )
+
+    decode_vin(db_session, VALID_VIN)
+
+    assert logging.getLogger("httpx").level == logging.WARNING
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +283,74 @@ def test_decode_vin_connect_error_returns_none_no_cache_row_redacted_log(
     assert "5LMJ" in caplog.text
 
 
+def test_decode_vin_non_dict_body_returns_none_no_cache_row(
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A 200 whose JSON body is a list/scalar (not the expected dict shape)
+
+    must be treated as a failure rather than raising AttributeError past
+    the existing ValueError catch.
+    """
+    monkeypatch.setattr(nhtsa_vpic.httpx, "get", lambda *a, **k: _response(200, [1, 2]))
+
+    with caplog.at_level(logging.WARNING, logger="app.sources.nhtsa_vpic"):
+        result = decode_vin(db_session, VALID_VIN)
+
+    assert result is None
+    assert db_session.get(VinDecodeCache, VALID_VIN) is None
+    assert VALID_VIN not in caplog.text
+
+
+def test_decode_vin_cache_write_failure_still_returns_decoded_result(
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A commit() failure (e.g. a racing decode hitting a unique-key
+
+    IntegrityError) must not turn into a 500 — the caller still gets the
+    decoded value, and the write failure is logged without leaking the
+    full VIN.
+    """
+    payload = {
+        "Results": [
+            {
+                "ModelYear": "2012",
+                "Make": "LAND ROVER",
+                "Model": "LR4",
+                "Trim": "HSE",
+                "BodyClass": "SUV",
+                "ErrorCode": "0",
+            }
+        ]
+    }
+    monkeypatch.setattr(
+        nhtsa_vpic.httpx, "get", lambda *a, **k: _response(200, payload)
+    )
+
+    real_commit = db_session.commit
+    calls = {"n": 0}
+
+    def _commit_once_then_raise():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("simulated IntegrityError")
+        return real_commit()
+
+    monkeypatch.setattr(db_session, "commit", _commit_once_then_raise)
+
+    with caplog.at_level(logging.WARNING, logger="app.sources.nhtsa_vpic"):
+        result = decode_vin(db_session, VALID_VIN)
+
+    assert result == DecodedVin(
+        year=2012, make="LAND ROVER", model="LR4", trim="HSE", body_class="SUV"
+    )
+    assert any("cache write failed" in record.message for record in caplog.records)
+    assert VALID_VIN not in caplog.text
+
+
 # ---------------------------------------------------------------------------
 # decode_vin — case 7: lowercase input with surrounding whitespace normalized
 # ---------------------------------------------------------------------------
@@ -287,7 +385,7 @@ def test_decode_vin_normalizes_lowercase_and_whitespace(
         year=2012, make="LAND ROVER", model="LR4", trim="HSE", body_class="SUV"
     )
     assert captured_urls == [
-        f"https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/{VALID_VIN}?format=json"
+        f"{settings.nhtsa_vpic_base_url}/vehicles/DecodeVinValues/{VALID_VIN}?format=json"
     ]
     cached = db_session.get(VinDecodeCache, VALID_VIN)
     assert cached is not None
@@ -415,6 +513,41 @@ def test_get_models_for_make_year_no_cache_plus_api_error_returns_none(
     monkeypatch: pytest.MonkeyPatch, db_session: Session
 ) -> None:
     monkeypatch.setattr(nhtsa_vpic.httpx, "get", lambda *a, **k: _response(500))
+
+    result = get_models_for_make_year(db_session, "Land Rover", 2012)
+
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# get_models_for_make_year — case 13: non-dict body treated as failure
+# ---------------------------------------------------------------------------
+
+
+def test_get_models_for_make_year_non_dict_body_serves_stale_when_cached(
+    monkeypatch: pytest.MonkeyPatch, db_session: Session
+) -> None:
+    stale_at = utcnow() - timedelta(days=31)
+    db_session.add(
+        NhtsaModelCache(
+            make="land rover",
+            year=2012,
+            models_json='["OLD MODEL"]',
+            cached_at=stale_at,
+        )
+    )
+    db_session.commit()
+    monkeypatch.setattr(nhtsa_vpic.httpx, "get", lambda *a, **k: _response(200, [1, 2]))
+
+    result = get_models_for_make_year(db_session, "Land Rover", 2012)
+
+    assert result == ["OLD MODEL"]
+
+
+def test_get_models_for_make_year_non_dict_body_no_cache_returns_none(
+    monkeypatch: pytest.MonkeyPatch, db_session: Session
+) -> None:
+    monkeypatch.setattr(nhtsa_vpic.httpx, "get", lambda *a, **k: _response(200, [1, 2]))
 
     result = get_models_for_make_year(db_session, "Land Rover", 2012)
 

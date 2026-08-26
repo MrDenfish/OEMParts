@@ -10,6 +10,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import timedelta
+from urllib.parse import quote
 
 import httpx
 from sqlalchemy.orm import Session
@@ -18,6 +19,11 @@ from app.config import settings
 from app.db.models import NhtsaModelCache, VinDecodeCache, utcnow
 
 logger = logging.getLogger(__name__)
+
+# httpx logs full request URLs at INFO; the decode URL contains the VIN.
+# Force WARNING so the never-log-VINs house rule can't be broken by a
+# future logging.basicConfig() in any entrypoint.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 MODEL_CACHE_TTL_DAYS = 30
 _TIMEOUT = 10
@@ -75,10 +81,14 @@ def decode_vin(db: Session, vin: str) -> DecodedVin | None:
         logger.warning("VIN decode HTTP %d for %s", response.status_code, _redact(vin))
         return None
     try:
-        results = response.json().get("Results") or []
+        data = response.json()
     except ValueError:
         logger.warning("VIN decode non-JSON body for %s", _redact(vin))
         return None
+    if not isinstance(data, dict):
+        logger.warning("VIN decode unexpected body shape for %s", _redact(vin))
+        return None
+    results = data.get("Results") or []
     row: dict = results[0] if results and isinstance(results[0], dict) else {}
 
     year_str = _clean(row.get("ModelYear"))
@@ -94,18 +104,22 @@ def decode_vin(db: Session, vin: str) -> DecodedVin | None:
         logger.info("VIN decode ErrorCode %s for %s", error_code, _redact(vin))
 
     # Cache even an all-None decode: NHTSA doesn't know this VIN — final.
-    db.add(
-        VinDecodeCache(
-            vin=vin,
-            year=decoded.year,
-            make=decoded.make,
-            model=decoded.model,
-            trim=decoded.trim,
-            body_class=decoded.body_class,
-            raw_json=json.dumps(row),
+    try:
+        db.add(
+            VinDecodeCache(
+                vin=vin,
+                year=decoded.year,
+                make=decoded.make,
+                model=decoded.model,
+                trim=decoded.trim,
+                body_class=decoded.body_class,
+                raw_json=json.dumps(row),
+            )
         )
-    )
-    db.commit()
+        db.commit()
+    except Exception as exc:  # e.g. IntegrityError from a racing decode
+        db.rollback()
+        logger.warning("VIN decode cache write failed for %s: %s", _redact(vin), exc)
     return decoded
 
 
@@ -119,12 +133,15 @@ def get_models_for_make_year(db: Session, make: str, year: int) -> list[str] | N
 
     url = (
         f"{settings.nhtsa_vpic_base_url}/vehicles/GetModelsForMakeYear"
-        f"/make/{make.strip()}/modelyear/{year}?format=json"
+        f"/make/{quote(make.strip(), safe='')}/modelyear/{year}?format=json"
     )
     try:
         response = httpx.get(url, timeout=_TIMEOUT)
         response.raise_for_status()
-        results = response.json().get("Results") or []
+        data = response.json()
+        if not isinstance(data, dict):
+            raise ValueError("unexpected NHTSA response shape")
+        results = data.get("Results") or []
     except (httpx.HTTPError, ValueError) as exc:
         logger.warning("NHTSA models fetch failed for %s %d: %s", make, year, exc)
         if cached is not None:  # serve stale rather than nothing

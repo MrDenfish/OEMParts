@@ -159,6 +159,26 @@ def test_model_options_none_yields_only_other_option(
     assert "not listed" in response.text
 
 
+def test_model_options_tolerates_empty_year_string(
+    authed_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The Make select's hx-get fires with year="" before a year is picked.
+
+    year: int = 0 would 422 here (FastAPI only applies int defaults when
+    the param is absent, not when it's ""); this must be a clean 200 with
+    only the fallback option, and NHTSA must not be called.
+    """
+
+    def _fail_if_called(db, make, year):
+        raise AssertionError("get_models_for_make_year should not be called")
+
+    monkeypatch.setattr(vehicles_module, "get_models_for_make_year", _fail_if_called)
+    response = authed_client.get("/vehicles/models?make=Land+Rover&year=")
+    assert response.status_code == 200
+    assert 'value="__other__"' in response.text
+    assert 'value="LR2"' not in response.text
+
+
 # --- POST /vehicles ------------------------------------------------------------
 
 

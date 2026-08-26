@@ -134,14 +134,21 @@ def decode_vin_endpoint(
 def model_options(
     request: Request,
     make: str = "",
-    year: int = 0,
+    year: str = "",
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """HTMX: <option> list for a make+year (fail-soft to the Other option)."""
+    """HTMX: <option> list for a make+year (fail-soft to the Other option).
+
+    year is a str, not int, because the Make select's hx-get fires with
+    year="" before a year is picked — FastAPI's int default only applies
+    when the param is absent, not when it's an empty string, and would
+    422 on that request.
+    """
+    year_int = int(year) if year.isdigit() else 0
     models = None
-    if make and make != "__other__" and year:
-        models = get_models_for_make_year(db, make, year)
+    if make and make != "__other__" and year_int:
+        models = get_models_for_make_year(db, make, year_int)
     return templates.TemplateResponse(
         request,
         "components/model_options.html",

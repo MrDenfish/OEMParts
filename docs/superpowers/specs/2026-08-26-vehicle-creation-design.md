@@ -154,16 +154,17 @@ Layout (top to bottom):
    - Make: `<select>` of `COMMON_MAKES` with
      `hx-get="/vehicles/models" hx-include="[name=year],[name=make]"
      hx-target="#model-select"` (also triggered by Year change).
-   - Model: `<select id="model-select">` (starts disabled, "pick year +
-     make first"); the "(not listed)" option toggles a free-text model
-     input via a small inline `hx-on` / checkbox reveal — no build step,
-     no custom JS files.
+   - Model: `<select id="model-select">` (placeholder option "pick year +
+     make first" — not disabled, since a disabled select wouldn't submit
+     and wouldn't survive the innerHTML options swap); the "(not listed)"
+     option pairs with a free-text model input — no build step, no
+     custom JS files.
    - Trim, Nickname: unchanged free-text.
 3. Existing submit → unchanged `hx-post="/vehicles"`.
 
-The free-text fallback keeps `make` as text too ("Other make…" option at
-the bottom of the Make select reveals both text inputs), so no vehicle is
-impossible to enter.
+The free-text make/model inputs are always visible alongside the
+dropdowns (no reveal/toggle) and override them server-side when filled,
+so no vehicle is impossible to enter.
 
 ### 4.6 What it feeds
 
