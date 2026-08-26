@@ -370,6 +370,21 @@ class VinDecodeCache(Base):
     )
 
 
+class NhtsaModelCache(Base):
+    """Cached NHTSA model lists per (make, year). TTL enforced in code."""
+
+    __tablename__ = "nhtsa_model_cache"
+
+    make: Mapped[str] = mapped_column(String(100), primary_key=True)
+    year: Mapped[int] = mapped_column(Integer, primary_key=True)
+    models_json: Mapped[str] = mapped_column(
+        Text, nullable=False, comment="JSON array of model names"
+    )
+    cached_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+
+
 # ---------------------------------------------------------------------------
 # Operational Tables
 # ---------------------------------------------------------------------------
