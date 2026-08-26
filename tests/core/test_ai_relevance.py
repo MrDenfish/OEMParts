@@ -251,6 +251,29 @@ class TestClassifyListings:
         )
 
 
+class TestLooksLikePartNumber:
+    @pytest.mark.parametrize(
+        "text",
+        ["LR072537", "949-919", "0221604022"],
+    )
+    def test_true_for_bare_part_numbers(self, text: str) -> None:
+        assert ai_relevance.looks_like_part_number(text) is True
+
+    @pytest.mark.parametrize(
+        "text",
+        ["water pump", "AMK compressor", "hose", "", "part number 123"],
+    )
+    def test_false_for_non_part_numbers(self, text: str) -> None:
+        assert ai_relevance.looks_like_part_number(text) is False
+
+    def test_false_for_lr4_too_short(self) -> None:
+        # "LR4" is 3 characters total. The regex requires a first char plus
+        # 3-24 more (4-25 total), so a 3-char token never matches even
+        # though it has a digit — this is intentional, not a gap: real part
+        # numbers are longer than a trim/model code like "LR4".
+        assert ai_relevance.looks_like_part_number("LR4") is False
+
+
 class TestCraftQuery:
     def _vehicle(self) -> Vehicle:
         return Vehicle(year=2012, make="Land Rover", model="LR4")  # type: ignore[call-arg]
