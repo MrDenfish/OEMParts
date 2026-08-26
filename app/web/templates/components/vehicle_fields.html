@@ -1,0 +1,65 @@
+{% if error %}<div class="form-error">{{ error }}</div>{% endif %}
+{% if mode == "decoded" %}
+<input type="hidden" name="vin" value="{{ vin }}">
+<div class="form-group">
+    <label for="year">Year</label>
+    <input type="number" id="year" name="year" class="form-control" required
+           value="{{ decoded.year or '' }}" style="width: 90px;">
+</div>
+<div class="form-group">
+    <label for="make_text">Make</label>
+    <input type="text" id="make_text" name="make_text" class="form-control" required
+           value="{{ decoded.make or '' }}" style="width: 150px;">
+</div>
+<div class="form-group">
+    <label for="model_text">Model</label>
+    <input type="text" id="model_text" name="model_text" class="form-control" required
+           value="{{ decoded.model or '' }}" style="width: 140px;">
+</div>
+<div class="form-group">
+    <label for="trim">Trim</label>
+    <input type="text" id="trim" name="trim" class="form-control"
+           value="{{ decoded.trim or '' }}" style="width: 120px;">
+</div>
+{% else %}
+<div class="form-group">
+    <label for="year">Year</label>
+    <select id="year" name="year" class="form-control" required style="width: 90px;"
+            hx-get="/vehicles/models" hx-include="[name='year'],[name='make']"
+            hx-target="#model-select" hx-swap="innerHTML">
+        <option value="">Year</option>
+        {% for y in years %}<option value="{{ y }}">{{ y }}</option>{% endfor %}
+    </select>
+</div>
+<div class="form-group">
+    <label for="make">Make</label>
+    <select id="make" name="make" class="form-control" style="width: 160px;"
+            hx-get="/vehicles/models" hx-include="[name='year'],[name='make']"
+            hx-target="#model-select" hx-swap="innerHTML">
+        <option value="">— select make —</option>
+        {% for m in makes %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
+        <option value="__other__">Other / not listed</option>
+    </select>
+</div>
+<div class="form-group">
+    <label for="model-select">Model</label>
+    <select id="model-select" name="model" class="form-control" style="width: 160px;">
+        <option value="">pick year &amp; make first</option>
+    </select>
+</div>
+<div class="form-group">
+    <label for="make_text">Make (type)</label>
+    <input type="text" id="make_text" name="make_text" class="form-control"
+           placeholder="If not listed" style="width: 130px;">
+</div>
+<div class="form-group">
+    <label for="model_text">Model (type)</label>
+    <input type="text" id="model_text" name="model_text" class="form-control"
+           placeholder="If not listed" style="width: 130px;">
+</div>
+<div class="form-group">
+    <label for="trim">Trim</label>
+    <input type="text" id="trim" name="trim" class="form-control"
+           placeholder="Optional" style="width: 100px;">
+</div>
+{% endif %}
