@@ -83,7 +83,11 @@ def scan_and_record(
                 price = listing.price
                 assert isinstance(price, Decimal), "Listing.price must be Decimal"
                 verdict = relevance_map.get(listing.id)
-                notable = verdict not in ("accessory", "unrelated") and (
+                notable = verdict not in (
+                    "accessory",
+                    "unrelated",
+                    "offbrand",
+                ) and (
                     is_low_in_search(price, stats)
                     or (
                         search.oem_number is not None

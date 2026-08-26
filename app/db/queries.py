@@ -378,6 +378,17 @@ def count_listings_for_user(
     return query.distinct().count()
 
 
+def get_listings_needing_aspects(db: Session, limit: int) -> list[Listing]:
+    """Active listings never successfully aspect-enriched, oldest first."""
+    return list(
+        db.query(Listing)
+        .filter(Listing.is_active.is_(True), Listing.aspects_fetched_at.is_(None))
+        .order_by(Listing.first_seen_at)
+        .limit(limit)
+        .all()
+    )
+
+
 # ---------------------------------------------------------------------------
 # SearchListing queries
 # ---------------------------------------------------------------------------

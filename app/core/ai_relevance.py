@@ -1,14 +1,16 @@
 """AI relevance classification and query crafting (fail-open).
 
 Two touchpoints (spec §4.2): classify_listings — one call per search
-batching listing titles into part/accessory/unrelated verdicts via
-structured outputs — and craft_query, a one-shot query refinement at
+batching listing titles into part/accessory/unrelated/offbrand verdicts
+via structured outputs — and craft_query, a one-shot query refinement at
 search creation. Every failure path returns None; callers treat None
 as "behave exactly as before". The API key is never logged.
 
-Listing titles are seller-controlled text interpolated into prompts;
-structured outputs (JSON schema, enum verdicts) bound the blast radius
-of a hostile title to a wrong verdict, not arbitrary model behavior.
+Listing titles are seller-controlled text interpolated into prompts, and
+so are the Brand/MPN/OE# Item Specifics aspect values fetched as ground
+truth; structured outputs (JSON schema, enum verdicts) bound the blast
+radius of a hostile title or aspect value to a wrong verdict, not
+arbitrary model behavior.
 """
 
 import json
@@ -23,7 +25,7 @@ from app.db.models import Listing, Search, Vehicle
 
 logger = logging.getLogger(__name__)
 
-VERDICTS = ("part", "accessory", "unrelated")
+VERDICTS = ("part", "accessory", "unrelated", "offbrand")
 MAX_CRAFTED_QUERY_LEN = 200
 
 CLASSIFY_SCHEMA = {
@@ -85,9 +87,17 @@ def classify_listings(
     if not listings:
         return {}
 
-    lines = "\n".join(
-        f"{i}. {listing.title} (${listing.price})" for i, listing in enumerate(listings)
-    )
+    def _listing_line(i: int, listing: Listing) -> str:
+        line = f"{i}. {listing.title} (${listing.price})"
+        if listing.brand:
+            line += f" — Brand: {listing.brand}"
+        if listing.mpn:
+            line += f" — MPN: {listing.mpn}"
+        if listing.oe_part_number:
+            line += f" — OE#: {listing.oe_part_number}"
+        return line
+
+    lines = "\n".join(_listing_line(i, listing) for i, listing in enumerate(listings))
     intent = (
         f"Search query: {search.query_text}\n"
         f"OEM part number: {search.oem_number or 'none'}\n"
@@ -101,11 +111,22 @@ def classify_listings(
         "The user's search describes ONE specific part they want to buy.\n\n"
         f"{intent}\n"
         "For each numbered listing below, decide:\n"
-        "- part: this listing IS the part itself (any brand, incl. "
-        "aftermarket equivalents and supersession part numbers)\n"
+        "- part: this listing IS the part itself (incl. aftermarket "
+        "equivalents when the query names no brand, genuine/OE items, "
+        "and supersession part numbers)\n"
         "- accessory: a bracket, mount, relay, pipe, seal, tool, or other "
         "item FOR the part, not the part itself\n"
-        "- unrelated: neither the part nor an accessory for it\n\n"
+        "- unrelated: neither the part nor an accessory for it\n"
+        "- offbrand: ONLY when the search query names a brand or "
+        "manufacturer AND this listing is a functional substitute from a "
+        "positively identified different brand\n\n"
+        "Brand/MPN/OE# fields come from eBay Item Specifics — trust them "
+        "over words in the title (sellers put brand names in titles to "
+        "catch searches). Genuine/OE items for the vehicle are 'part', "
+        "never 'offbrand'. A missing or 'Unbranded' brand is NEVER "
+        "grounds for 'offbrand'. An OE# matching the search's OEM part "
+        "number is strong evidence of 'part'. If the query names no "
+        "brand, never use 'offbrand'.\n\n"
         f"Listings:\n{lines}"
     )
 

@@ -139,3 +139,46 @@ def test_unrelated_tag_renders(
     page = authed_client.get(f"/listings/?search_id={test_search.id}")
     assert page.status_code == 200
     assert "Classified as unrelated to this search" in page.text
+
+
+def test_offbrand_tag_renders(
+    authed_client: TestClient, db_session: Session, test_search: Search
+) -> None:
+    from app.db import queries
+
+    dropper = seed(db_session, test_search)  # 5 listings incl. the 25.00 one
+    queries.set_link_relevance(db_session, test_search.id, dropper.id, "offbrand")
+    db_session.commit()
+    page = authed_client.get(f"/listings/?search_id={test_search.id}")
+    assert page.status_code == 200
+    assert "Classified as a different brand than this search asks for" in page.text
+
+
+def test_brand_column_renders(
+    authed_client: TestClient, db_session: Session, test_search: Search
+) -> None:
+    """Brand column shows brand value or — when None."""
+    dropper = seed(db_session, test_search)
+    dropper.brand = "Dorman"
+    db_session.commit()
+    page = authed_client.get(f"/listings/?search_id={test_search.id}")
+    assert page.status_code == 200
+    assert "Dorman" in page.text
+
+
+def test_brand_column_renders_dash_when_none(
+    authed_client: TestClient, db_session: Session, test_search: Search
+) -> None:
+    """Brand column shows — when brand is None.
+
+    Every seeded listing gets a non-null condition so the condition cell
+    (also `<td>{{ value or '—' }}</td>`) never renders a dash — the only
+    `<td>—</td>` on the page can then only be the brand cell.
+    """
+    seed(db_session, test_search)
+    for listing in db_session.query(Listing).all():
+        listing.condition = "Used"
+    db_session.commit()
+    page = authed_client.get(f"/listings/?search_id={test_search.id}")
+    assert page.status_code == 200
+    assert "<td>—</td>" in page.text
