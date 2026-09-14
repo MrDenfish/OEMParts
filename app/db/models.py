@@ -385,6 +385,30 @@ class NhtsaModelCache(Base):
     )
 
 
+class CompatValueCache(Base):
+    """Cached eBay fitment property values (canonical Make/Model spellings).
+
+    eBay's compatibility_filter matches values case-sensitively, so vehicle
+    make/model must be stored in eBay's exact canonical spelling. This table
+    caches the catalog's value lists per (property, category, make filter).
+    filter_make is "" for Make rows — a composite primary key cannot hold
+    NULL. TTL enforced in code (see ebay_taxonomy.COMPAT_VALUE_CACHE_TTL).
+    """
+
+    __tablename__ = "compat_value_cache"
+
+    property: Mapped[str] = mapped_column(String(20), primary_key=True)
+    category_id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    filter_make: Mapped[str] = mapped_column(String(100), primary_key=True, default="")
+    marketplace: Mapped[str] = mapped_column(String(20), primary_key=True)
+    values_json: Mapped[str] = mapped_column(
+        Text, nullable=False, comment="JSON array of canonical values"
+    )
+    refreshed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+
+
 # ---------------------------------------------------------------------------
 # Operational Tables
 # ---------------------------------------------------------------------------
