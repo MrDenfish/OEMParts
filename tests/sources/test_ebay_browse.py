@@ -163,3 +163,12 @@ def test_non_200_with_malformed_json_and_filter_returns_empty(
         category_ids="184656",
     )
     assert result == []
+
+
+def test_limit_override_passed_and_clamped_to_ebay_max(db_session: Session) -> None:
+    """A caller's limit override is sent to eBay, clamped to the API max (200)."""
+    ebay_browse.search_ebay(db_session, query="alternator", limit=200)
+    assert FakeClient.captured["params"]["limit"] == 200
+
+    ebay_browse.search_ebay(db_session, query="alternator", limit=500)
+    assert FakeClient.captured["params"]["limit"] == 200
