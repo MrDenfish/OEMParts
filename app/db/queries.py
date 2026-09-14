@@ -505,7 +505,13 @@ def complete_fetch_run(
     fetch_run.listings_updated = listings_updated
     fetch_run.api_calls_made = api_calls_made
     fetch_run.errors = errors
-    fetch_run.status = "completed" if errors < searches_processed else "failed"
+    # "failed" means errors swamped the work (searches_processed counts only
+    # successes, so all-searches-erroring shows up as errors >= processed).
+    # A cycle with nothing to do (0 searches, 0 errors — e.g. intraday with
+    # no high-priority searches) is a healthy no-op, not a failure.
+    fetch_run.status = (
+        "failed" if errors > 0 and errors >= searches_processed else "completed"
+    )
     db.flush()
 
 
