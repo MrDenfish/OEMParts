@@ -3,7 +3,7 @@
 > **Audience:** Developers, AI assistants, and outside collaborators.
 > **How to use:** Read top-to-bottom for full context, or jump to a section. If you're an AI assistant starting a new conversation, this is your single-source briefing.
 > **Keeping it current:** Update the [Changelog](#changelog) at the bottom whenever significant changes ship. Stale docs are worse than no docs.
-> **Status:** Phase 2 in progress. Phase 1 MVP complete (2026-04-26) and validated end-to-end with real eBay data. First Phase 2 item — Clerk auth — merged to `main` 2026-07-15 (PR #1). **2026-08-23: owner deferred EC2 deployment — staying local-first for now**; a macOS app-style local launcher (`setup.sh` → OEMParts.app) replaces it as the way the app runs. Taxonomy-based fitment filtering merged 2026-08-24 (PR #2) and validated against the live eBay API; GitHub Actions CI now runs on every PR. Scheduled fetch cycles live 2026-08-24 (launchd on the owner's Mac). Price digest + email alerts (PR #4), AI relevance filter (PR #5), brand-aware filtering (PR #6), and VIN decoding + Y/M/M dropdowns (PR #7, 2026-08-26) are all merged — **the Phase 2 feature scope is complete**; EC2 deployment remains deferred until the owner wants the site hosted. See [Changelog](#changelog) for details.
+> **Status:** Phase 2 in progress. Phase 1 MVP complete (2026-04-26) and validated end-to-end with real eBay data. First Phase 2 item — Clerk auth — merged to `main` 2026-07-15 (PR #1). **2026-08-23: owner deferred EC2 deployment — staying local-first for now**; a macOS app-style local launcher (`setup.sh` → OEMParts.app) replaces it as the way the app runs. Taxonomy-based fitment filtering merged 2026-08-24 (PR #2) and validated against the live eBay API; GitHub Actions CI now runs on every PR. Scheduled fetch cycles live 2026-08-24 (launchd on the owner's Mac). Price digest + email alerts (PR #4), AI relevance filter (PR #5), brand-aware filtering (PR #6), and VIN decoding + Y/M/M dropdowns (PR #7, 2026-08-26) are all merged — **the Phase 2 feature scope is complete**; EC2 deployment remains deferred until the owner wants the site hosted. **2026-09-14: search-quality hardening pass merged (PRs #8–#11)** — self-healing OEM-only toggle, make/model canonicalization to eBay's fitment-catalog spelling (the compatibility_filter is case-sensitive!), fetch-run status fix for empty cycles, and deep fetch (limit 200) for OEM-only searches. See [Changelog](#changelog) for details.
 
 ---
 
@@ -174,7 +174,7 @@ OEMPartsAgent/
 
 Per-fetch fallback: If the API rejects a fitment-mode call (e.g., eBay changes category support), the search runner automatically retries in fallback mode.
 
-When a search has an OEM number AND `oem_only=true`, results are further post-filtered: a listing is kept only if its title contains the word "OEM", the word "Genuine", or the OEM part number itself (with hyphens/spaces stripped). The Browse API has no native title-must-contain filter, so this trimming is done in the worker after the response is returned. The toggle defaults to ON for newly created searches that include an OEM number, and OFF otherwise; users can flip it per search from the dashboard.
+When a search has an OEM number AND `oem_only=true`, results are further post-filtered: a listing is kept only if its title contains the word "OEM", the word "Genuine", or the OEM part number itself (with hyphens/spaces stripped). The Browse API has no native title-must-contain filter, so this trimming is done in the worker after the response is returned. The toggle defaults to ON for newly created searches that include an OEM number, and OFF otherwise; users can flip it per search from the dashboard. Because this filter discards most of each page before persist, OEM-only searches fetch with `limit=FETCH_OEM_DEEP_LIMIT` (200, eBay's single-call max — same quota cost as 50) instead of the default 50; toggling OEM-only back ON also re-applies the filter to already-linked listings (2026-09-14).
 
 **Listing TTL:** Listings have an `ebay_end_date` from the API. Expired listings are marked `is_active=false` but retained for historical price context. A nightly `cleanup` job purges listings older than 180 days with no recent price updates.
 
@@ -319,6 +319,7 @@ PYTHONPATH=$PWD uvicorn app.web.main:app --host 0.0.0.0 --port 8000 --reload
 
 - **OAuth token lifetime:** eBay tokens expire in ~2 hours. The client must check expiry and refresh before each call. In-memory cache is faster but disappears on container restart — DB fallback exists for cold start.
 - **Compatibility filter is category-scoped:** Only eBay Motors (category 6028 and descendants) supports `compatibility_filter`. For parts that live in other categories (e.g., "tools" or "electronics"), the filter is silently ignored. Search runner should log a warning in this case.
+- **Compatibility filter values are CASE-SENSITIVE (verified live 2026-09-14):** `Make:LAND ROVER` matched 48 listings where `Make:Land Rover` matched 125 — a silent degradation (normal 200, no warning), and `Model:lr4` vs `LR4` behaves the same. There is exactly one canonical spelling per make/model in eBay's fitment catalog; do NOT fan out queries over case variants. Vehicle make/model are canonicalized at creation via `canonicalize_make`/`canonicalize_model` (Taxonomy `get_compatibility_property_values`, cached in `compat_value_cache`). NHTSA VIN decodes return all-caps values, which is how this bit us.
 - **EPN 24-hour cookie is brutal:** A user researching a part Tuesday who buys Friday earns you nothing. UX implication: surface "Buy on eBay" CTAs only when user intent is high (e.g., when they mark a listing as "interested"), not on every card.
 - **Affiliate links must not appear on eBay property:** EPN TOS prohibits affiliate links from being posted as messages or listings on eBay itself. Users must click through from an external site (our dashboard). Not a technical issue but a policy constraint to document clearly.
 - **Part number matching is fuzzy:** Sellers inconsistently include OEM numbers in titles. Dual-query strategy (OEM + descriptive) is partial mitigation, not a cure. Accept that some listings will be missed.
@@ -393,7 +394,8 @@ SESSION_SECRET_KEY=<32-byte-hex>             # FastAPI session middleware
 
 # ── Fetching ──
 FETCH_DEFAULT_TTL_MINUTES=240                # Dedup cache TTL (4 hours)
-FETCH_MAX_LISTINGS_PER_QUERY=50              # Browse API per-query limit
+FETCH_MAX_LISTINGS_PER_QUERY=50              # Browse API per-query limit (non-OEM searches)
+FETCH_OEM_DEEP_LIMIT=200                     # Single-call limit for OEM-only searches (200 = eBay max)
 FETCH_API_RATE_LIMIT_PER_MIN=30              # Internal throttle below eBay's limits
 
 # ── Alerts (Phase 3) ──

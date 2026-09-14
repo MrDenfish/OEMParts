@@ -140,9 +140,9 @@ mypy app/
 - **Browse API endpoint:** `https://api.ebay.com/buy/browse/v1/item_summary/search`
 - **Required headers:** `Authorization: Bearer {token}`, `X-EBAY-C-MARKETPLACE-ID: EBAY_US`
 - **Affiliate header (Phase 3+):** `X-EBAY-C-ENDUSERCTX: affiliateCampaignId={EPN_CAMPAIGN_ID}`. When set, responses include `itemAffiliateWebUrl`.
-- **Compatibility filter:** Only works within eBay Motors categories (6028 + descendants). Silently ignored elsewhere.
+- **Compatibility filter:** Only works within eBay Motors categories (6028 + descendants). Silently ignored elsewhere. **Values are case-sensitive** — "LAND ROVER" silently matches a fraction of what "Land Rover" matches; make/model must be eBay's canonical catalog spelling (canonicalized at vehicle creation, see `app/core/compatibility.py`).
 - **Rate limit:** 5,000 calls/day default at the app (not user) level. Log every call to `api_quota_log` for observability.
-- **Pagination:** Use `offset` + `limit`. Max `limit=200` per call. Cap at `FETCH_MAX_LISTINGS_PER_QUERY` (default 50) — deeper pages are usually noise.
+- **Pagination:** Use `offset` + `limit`. Max `limit=200` per call. Non-OEM searches cap at `FETCH_MAX_LISTINGS_PER_QUERY` (default 50) — deeper pages are unfiltered noise. OEM-only searches fetch `FETCH_OEM_DEEP_LIMIT` (default 200, same quota cost) because the title filter prunes before persist.
 
 ---
 
