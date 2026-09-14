@@ -7,11 +7,16 @@ Accessories (6028) and supports Year/Make/Model compatibility.
 """
 
 import logging
+import re
 from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
 from app.sources import ebay_taxonomy
+from app.sources.ebay_taxonomy import (
+    REFERENCE_FITMENT_CATEGORY_ID,
+    get_compatibility_property_values,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +33,61 @@ class ResolvedCategory:
 
     category_id: str
     category_name: str
+
+
+def _fitment_key(value: str) -> str:
+    """Lowercase alphanumerics only, so all spelling variants collide.
+
+    'LAND ROVER', 'LandROVER', and 'Land rover' all normalize to
+    'landrover' and therefore match the canonical 'Land Rover'.
+    """
+    return re.sub(r"[^a-z0-9]", "", value.lower())
+
+
+def canonicalize_make(db: Session, make: str) -> str:
+    """Map a make to eBay's canonical fitment-catalog spelling.
+
+    eBay's compatibility_filter matches values case-sensitively — verified
+    live 2026-09-14: Make "LAND ROVER" silently matched 48 listings where
+    "Land Rover" matched 125. NHTSA VIN decodes return all-caps makes, so
+    every make must pass through here before being stored on a vehicle.
+    Returns the input unchanged when it is blank, unknown to the catalog,
+    or the catalog lookup fails (fail-open — a fetch with the raw value
+    still returns *some* results, and the value stays user-recognizable).
+    """
+    if not make.strip():
+        return make
+    values = get_compatibility_property_values(
+        db, REFERENCE_FITMENT_CATEGORY_ID, "Make"
+    )
+    if not values:
+        return make
+    key = _fitment_key(make)
+    for canonical in values:
+        if _fitment_key(canonical) == key:
+            return canonical
+    return make
+
+
+def canonicalize_model(db: Session, make: str, model: str) -> str:
+    """Map a model to eBay's canonical spelling within one make.
+
+    Pass the already-canonicalized make — the catalog scopes model lists
+    by make ("lr4" → "LR4" only under "Land Rover"). Same fail-open
+    semantics as canonicalize_make.
+    """
+    if not model.strip() or not make.strip():
+        return model
+    values = get_compatibility_property_values(
+        db, REFERENCE_FITMENT_CATEGORY_ID, "Model", filter_make=make
+    )
+    if not values:
+        return model
+    key = _fitment_key(model)
+    for canonical in values:
+        if _fitment_key(canonical) == key:
+            return canonical
+    return model
 
 
 def build_compatibility_filter(year: int, make: str, model: str) -> str:
