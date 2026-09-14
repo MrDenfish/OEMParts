@@ -221,14 +221,30 @@ def toggle_search_oem_only(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Toggle a search's OEM-only title filter."""
+    """Toggle a search's OEM-only title filter.
+
+    When the toggle lands ON, re-apply the filter to already-linked listings:
+    the filter otherwise runs only at fetch time, so listings linked while it
+    was off would stay on the dashboard indefinitely (2026-09-14 incident:
+    47 aftermarket alternators linked during a brief toggle-off).
+    """
     from app.web.main import templates
 
     search = queries.toggle_search_oem_only(db, search_id, current_user.id)
-    db.commit()
 
     if search is None:
         return Response(status_code=404, content="Search not found")
+
+    if search.oem_only and search.oem_number:
+        removed = queries.remove_non_oem_links(db, search)
+        if removed:
+            logger.info(
+                "OEM-only re-enabled for '%s': pruned %d non-matching listing links",
+                search.query_text,
+                removed,
+            )
+
+    db.commit()
 
     if request.headers.get("HX-Request"):
         return templates.TemplateResponse(

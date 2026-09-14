@@ -14,6 +14,7 @@ from decimal import Decimal
 from sqlalchemy import delete, update
 from sqlalchemy.orm import Session
 
+from app.core.oem_filter import title_matches_oem
 from app.db.models import (
     Alert,
     FetchRun,
@@ -412,6 +413,38 @@ def link_search_to_listing(
         link = SearchListing(search_id=search_id, listing_id=listing_id)
         db.add(link)
         db.flush()
+
+
+def remove_non_oem_links(db: Session, search: Search) -> int:
+    """Delete this search's links to listings whose titles fail the OEM filter.
+
+    The OEM-only filter normally runs at fetch time only (search_runner), so
+    listings linked while the filter was toggled off survive when it is
+    toggled back on. Calling this when the toggle lands ON prunes those stale
+    links. Only the search_listings junction rows are deleted — the listings
+    themselves are shared data and other searches may still reference them.
+
+    Returns the number of links removed (0 if the search has no OEM number,
+    since the filter has nothing to enforce without one).
+    """
+    if not search.oem_number:
+        return 0
+
+    rows = (
+        db.query(SearchListing, Listing.title)
+        .join(Listing, Listing.id == SearchListing.listing_id)
+        .filter(SearchListing.search_id == search.id)
+        .all()
+    )
+
+    removed = 0
+    for link, title in rows:
+        if not title_matches_oem(title, search.oem_number):
+            db.delete(link)
+            removed += 1
+
+    db.flush()
+    return removed
 
 
 # ---------------------------------------------------------------------------

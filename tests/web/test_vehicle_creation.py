@@ -30,6 +30,20 @@ def _force_basic_auth(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "ai_filter_enabled", False)
 
 
+@pytest.fixture(autouse=True)
+def _offline_canonicalize(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub fitment canonicalization to identity for every test here.
+
+    The real functions read through compat_value_cache and fall back to the
+    live eBay Taxonomy API — tests must never hit the network. Tests that
+    exercise canonicalization behavior override these with their own stubs.
+    """
+    monkeypatch.setattr(vehicles_module, "canonicalize_make", lambda db, make: make)
+    monkeypatch.setattr(
+        vehicles_module, "canonicalize_model", lambda db, make, model: model
+    )
+
+
 @pytest.fixture()
 def authed_client(db_session: Session, test_user: User) -> TestClient:
     """Provide an authenticated test client as the test_user."""
@@ -286,3 +300,80 @@ def test_create_plain_full_form_post_regression(
     assert vehicle.model == "LR4"
     # HTMX request returns the new row partial.
     assert f'id="vehicle-{vehicle.id}"' in response.text
+
+
+# --- Canonicalization of make/model (eBay fitment catalog spelling) -----------
+
+
+@pytest.fixture()
+def _fake_canonicalize(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub the catalog lookup: all-caps Land Rover variants -> canonical."""
+
+    def fake_make(db: Session, make: str) -> str:
+        return "Land Rover" if make.lower() == "land rover" else make
+
+    def fake_model(db: Session, make: str, model: str) -> str:
+        return "LR4" if model.lower() in ("lr4", "lr-4") else model
+
+    monkeypatch.setattr(vehicles_module, "canonicalize_make", fake_make)
+    monkeypatch.setattr(vehicles_module, "canonicalize_model", fake_model)
+
+
+def test_create_canonicalizes_make_and_model(
+    authed_client: TestClient,
+    db_session: Session,
+    test_user: User,
+    _fake_canonicalize: None,
+) -> None:
+    """NHTSA-style all-caps input is stored in eBay's canonical spelling."""
+    response = authed_client.post(
+        "/vehicles",
+        data={"year": "2012", "make_text": "LAND ROVER", "model_text": "lr4"},
+        headers={"HX-Request": "true"},
+    )
+    assert response.status_code == 200
+    vehicle = db_session.query(Vehicle).filter_by(user_id=test_user.id).one()
+    assert vehicle.make == "Land Rover"
+    assert vehicle.model == "LR4"
+
+
+def test_create_survives_canonicalization_error(
+    authed_client: TestClient,
+    db_session: Session,
+    test_user: User,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A canonicalization crash must never block vehicle creation."""
+
+    def boom(db: Session, make: str) -> str:
+        raise RuntimeError("catalog lookup exploded")
+
+    monkeypatch.setattr(vehicles_module, "canonicalize_make", boom)
+
+    response = authed_client.post(
+        "/vehicles",
+        data={"year": "2012", "make_text": "LAND ROVER", "model_text": "LR4"},
+        headers={"HX-Request": "true"},
+    )
+    assert response.status_code == 200
+    vehicle = db_session.query(Vehicle).filter_by(user_id=test_user.id).one()
+    assert vehicle.make == "LAND ROVER"  # raw value kept, creation unblocked
+
+
+def test_decode_vin_canonicalizes_displayed_make_and_model(
+    authed_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    _fake_canonicalize: None,
+) -> None:
+    """The decoded form shows eBay's spelling, not NHTSA's all-caps."""
+    monkeypatch.setattr(
+        vehicles_module,
+        "decode_vin",
+        lambda db, vin: DecodedVin(2012, "LAND ROVER", "lr4", "HSE", "SUV"),
+    )
+    response = authed_client.post(
+        "/vehicles/decode-vin", data={"vin_lookup": "SALAG2D40CA000000"}
+    )
+    assert response.status_code == 200
+    assert 'value="Land Rover"' in response.text
+    assert 'value="LR4"' in response.text
