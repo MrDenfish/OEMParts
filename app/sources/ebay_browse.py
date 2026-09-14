@@ -219,7 +219,8 @@ def search_ebay(
     # eBay Browse API condition IDs
     condition_ids = {"new": "1000", "used": "3000"}
 
-    effective_limit = limit or settings.fetch_max_listings_per_query
+    # 200 is the Browse API's hard per-call maximum for `limit`.
+    effective_limit = min(limit or settings.fetch_max_listings_per_query, 200)
     token = get_ebay_token(db)
 
     # Build request parameters

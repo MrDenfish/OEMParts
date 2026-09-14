@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     fetch_default_ttl_minutes: int = 240
     fetch_max_listings_per_query: int = 50
     fetch_api_rate_limit_per_min: int = 30
+    # Deeper single-call limit for OEM-only searches (the title filter
+    # discards most results before persist, so depth is free signal there;
+    # 200 is the Browse API's per-call maximum — same quota cost as 50).
+    fetch_oem_deep_limit: int = 200
 
     # Alerts / Digest
     alerts_enabled: bool = False

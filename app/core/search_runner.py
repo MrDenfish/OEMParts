@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.core.compatibility import build_compatibility_filter
 from app.core.oem_filter import title_matches_oem
 from app.core.price_tracker import record_price_and_detect_change
@@ -51,6 +52,15 @@ def run_single_search(db: Session, search: Search) -> SearchResult:
         f"{vehicle.year} {vehicle.make} {vehicle.model} {search.query_text}"
     )
 
+    # OEM-only searches fetch deep: their title filter (below) discards most
+    # of the page before anything is persisted, so the default 50 starves
+    # them (2026-09-14: alternator search kept 6 of 50 while 125 matched).
+    # One call at limit=200 costs the same quota as one call at 50. Searches
+    # without the filter keep the default — deeper pages are unfiltered noise.
+    fetch_limit = (
+        settings.fetch_oem_deep_limit if search.oem_only and search.oem_number else None
+    )
+
     fitment_mode = False
     if search.category_id:
         # Fitment mode: eBay guarantees the part fits, so the query stays
@@ -65,6 +75,7 @@ def run_single_search(db: Session, search: Search) -> SearchResult:
                 category_ids=search.category_id,
                 max_price=search.max_price,
                 condition=search.condition_filter,
+                limit=fetch_limit,
             )
             fitment_mode = True
             api_calls = 1
@@ -81,6 +92,7 @@ def run_single_search(db: Session, search: Search) -> SearchResult:
                 query=enriched_query,
                 max_price=search.max_price,
                 condition=search.condition_filter,
+                limit=fetch_limit,
             )
             api_calls = 2
     else:
@@ -91,6 +103,7 @@ def run_single_search(db: Session, search: Search) -> SearchResult:
             query=enriched_query,
             max_price=search.max_price,
             condition=search.condition_filter,
+            limit=fetch_limit,
         )
         api_calls = 1
 
