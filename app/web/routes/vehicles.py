@@ -1,5 +1,6 @@
 """My vehicles (add/edit/delete) routes."""
 
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, Form, Request, Response
@@ -7,12 +8,15 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user
+from app.core.compatibility import canonicalize_make, canonicalize_model
 from app.db import queries
 from app.db.models import User
 from app.db.session import get_db
 from app.sources.nhtsa_vpic import decode_vin, get_models_for_make_year, is_valid_vin
 from app.web.main import templates
 from app.web.makes import COMMON_MAKES
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -73,6 +77,20 @@ def create_vehicle(
         response.headers["HX-Reswap"] = "innerHTML"
         return response
 
+    # Canonicalize to eBay's fitment-catalog spelling. The Browse API's
+    # compatibility_filter is case-sensitive ("LAND ROVER" silently matched
+    # 48 listings where "Land Rover" matched 125 — live incident 2026-09-14),
+    # and NHTSA VIN decodes return all-caps makes/models. Inline taxonomy
+    # call, sanctioned by the CLAUDE.md exception; cached 30 days. Failure
+    # must never block vehicle creation — the raw values are kept.
+    try:
+        final_make = canonicalize_make(db, final_make)
+        final_model = canonicalize_model(db, final_make, final_model)
+    except Exception:
+        logger.exception(
+            "Fitment canonicalization errored for '%s %s'", final_make, final_model
+        )
+
     clean_vin = vin.strip().upper() if vin else None
     vehicle = queries.create_vehicle(
         db,
@@ -119,6 +137,21 @@ def decode_vin_endpoint(
                 ),
             },
         )
+    # Show eBay's canonical spelling in the form, not NHTSA's all-caps
+    # ("LAND ROVER" → "Land Rover"). The create route canonicalizes again
+    # at storage time, so this is display polish — same fail-open rule.
+    try:
+        if decoded.make:
+            decoded.make = canonicalize_make(db, decoded.make)
+        if decoded.make and decoded.model:
+            decoded.model = canonicalize_model(db, decoded.make, decoded.model)
+    except Exception:
+        logger.exception(
+            "Fitment canonicalization errored for decoded '%s %s'",
+            decoded.make,
+            decoded.model,
+        )
+
     return templates.TemplateResponse(
         request,
         "components/vehicle_fields.html",

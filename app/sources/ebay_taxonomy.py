@@ -17,7 +17,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.db.models import ApiQuotaLog, TaxonomyCache, utcnow
+from app.db.models import ApiQuotaLog, CompatValueCache, TaxonomyCache, utcnow
 from app.sources.ebay_oauth import get_ebay_token
 
 logger = logging.getLogger(__name__)
@@ -27,6 +27,17 @@ TAXONOMY_SANDBOX_BASE = "https://api.sandbox.ebay.com/commerce/taxonomy/v1"
 
 # Fitment support per category changes rarely; refresh monthly.
 TAXONOMY_CACHE_TTL = timedelta(days=30)
+
+# Canonical Make/Model spellings change even more rarely, but share the
+# same monthly refresh cadence for simplicity.
+COMPAT_VALUE_CACHE_TTL = timedelta(days=30)
+
+# Category used when looking up the master Make list for canonicalization.
+# The values endpoint requires a fitment-supporting leaf category; any one
+# yields the vehicle catalog's make spellings. Alternators & Generators is
+# used by real searches and was verified live 2026-09-14 (472 makes,
+# including "Land Rover").
+REFERENCE_FITMENT_CATEGORY_ID = "177697"
 
 # In-process cache for the marketplace's category tree id (a small,
 # effectively static value — one API call per process lifetime).
@@ -243,3 +254,65 @@ def get_compatibility_properties(db: Session, category_id: str) -> list[str]:
         ]
     _store_cached_properties(db, category_id, properties)
     return properties
+
+
+def get_compatibility_property_values(
+    db: Session,
+    category_id: str,
+    property_name: str,
+    filter_make: str | None = None,
+) -> list[str] | None:
+    """Return eBay's canonical values for a fitment property, cache-then-API.
+
+    For property "Model", pass filter_make so the list is scoped to one
+    make (eBay requires the filter and the cache is keyed by it). Reads
+    through compat_value_cache with a 30-day TTL; on API failure a stale
+    row is served rather than nothing (canonical spellings change rarely).
+    Returns None only when there is no cache row at all and the API failed.
+    """
+    key_make = filter_make or ""
+    row = db.get(
+        CompatValueCache,
+        (property_name, category_id, key_make, settings.ebay_marketplace_id),
+    )
+    if row is not None and row.refreshed_at >= utcnow() - COMPAT_VALUE_CACHE_TTL:
+        return json.loads(row.values_json)
+
+    data = None
+    tree_id = get_default_tree_id(db)
+    if tree_id is not None:
+        params = {
+            "category_id": category_id,
+            "compatibility_property": property_name,
+        }
+        if filter_make:
+            params["filter"] = f"Make:{filter_make}"
+        data = _request_json(
+            db,
+            f"/category_tree/{tree_id}/get_compatibility_property_values",
+            params,
+        )
+    if data is None:
+        if row is not None:  # serve stale rather than nothing
+            return json.loads(row.values_json)
+        return None
+
+    values = [
+        str(v["value"])
+        for v in data.get("compatibilityPropertyValues", [])
+        if v.get("value")
+    ]
+    if row is None:
+        row = CompatValueCache(
+            property=property_name,
+            category_id=category_id,
+            filter_make=key_make,
+            marketplace=settings.ebay_marketplace_id,
+            values_json=json.dumps(values),
+        )
+        db.add(row)
+    else:
+        row.values_json = json.dumps(values)
+        row.refreshed_at = utcnow()
+    db.flush()
+    return values
